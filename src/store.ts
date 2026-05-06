@@ -298,7 +298,7 @@ export const useStore = create<AppState>()(
       setConfirmDialog: (confirmDialog) => set({ confirmDialog }),
     }),
     {
-      name: 'gpt-image-playground',
+      name: 'ai-52moyu-net',
       partialize: (state) => ({
         settings: state.settings,
         params: state.params,
@@ -1056,7 +1056,7 @@ export async function exportData() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `gpt-image-playground-${Date.now()}.zip`
+    a.download = `ai-52moyu-net-${Date.now()}.zip`
     a.click()
     URL.revokeObjectURL(url)
     useStore.getState().showToast('数据已导出', 'success')

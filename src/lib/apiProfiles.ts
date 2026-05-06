@@ -1,7 +1,19 @@
 import type { ApiMode, ApiProfile, ApiProvider, AppSettings } from '../types'
 import { readRuntimeEnv } from './runtimeEnv'
+import { isPrivateOrLocalHostname, normalizeBaseUrl } from './devProxy'
 
-const DEFAULT_BASE_URL = readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL) || 'https://api.openai.com/v1'
+export const SUB2API_INTRANET_BASE_URL = 'http://192.168.0.171:8080'
+export const SUB2API_PUBLIC_BASE_URL = 'https://ai.52moyu.net'
+
+export function resolveManagedApiBaseUrl(hostname = typeof window !== 'undefined' ? window.location.hostname : ''): string {
+  const fallback = readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL) || SUB2API_PUBLIC_BASE_URL
+  const rawBaseUrl = hostname && isPrivateOrLocalHostname(hostname)
+    ? SUB2API_INTRANET_BASE_URL
+    : fallback
+  return normalizeBaseUrl(rawBaseUrl)
+}
+
+const DEFAULT_BASE_URL = resolveManagedApiBaseUrl()
 export const DEFAULT_IMAGES_MODEL = 'gpt-image-2'
 export const DEFAULT_RESPONSES_MODEL = 'gpt-5.5'
 export const DEFAULT_FAL_BASE_URL = 'https://fal.run'
@@ -121,7 +133,7 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
   const normalized = normalizeSettings(settings)
   const profile = normalized.profiles.find((p) => p.id === normalized.activeProfileId) ?? normalized.profiles[0] ?? createDefaultOpenAIProfile()
 
-  return {
+  const nextProfile = {
     ...profile,
     baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : profile.baseUrl,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : profile.apiKey,
@@ -131,6 +143,12 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
     codexCli: typeof record.codexCli === 'boolean' ? record.codexCli : profile.codexCli,
     apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : profile.apiProxy,
   }
+
+  if (nextProfile.provider === 'openai') {
+    nextProfile.baseUrl = resolveManagedApiBaseUrl()
+  }
+
+  return nextProfile
 }
 
 export function validateApiProfile(profile: ApiProfile): string | null {

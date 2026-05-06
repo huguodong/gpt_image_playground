@@ -121,7 +121,7 @@ describe('callImageApi', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api-proxy/images/generations',
+      '/api-proxy/v1/images/generations',
       expect.objectContaining({ method: 'POST' }),
     )
   })
@@ -148,12 +148,12 @@ describe('callImageApi', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.example.com/v1/images/generations',
+      'https://ai.52moyu.net/v1/images/generations',
       expect.objectContaining({ method: 'POST' }),
     )
   })
 
-  it('uses the dev proxy automatically for local network API URLs', async () => {
+  it('uses the managed domain URL for Responses API requests by default', async () => {
     vi.stubGlobal('__DEV_PROXY_CONFIG__', {
       enabled: true,
       prefix: '/api-proxy',
@@ -185,7 +185,7 @@ describe('callImageApi', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api-proxy/responses',
+      'https://ai.52moyu.net/v1/responses',
       expect.objectContaining({ method: 'POST' }),
     )
   })

@@ -6,6 +6,9 @@ import {
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_SETTINGS,
   mergeImportedSettings,
+  resolveManagedApiBaseUrl,
+  SUB2API_INTRANET_BASE_URL,
+  SUB2API_PUBLIC_BASE_URL,
 } from './apiProfiles'
 
 describe('mergeImportedSettings', () => {
@@ -212,5 +215,23 @@ describe('mergeImportedSettings', () => {
     expect(merged.profiles).toHaveLength(2)
     expect(merged.profiles[0]).toMatchObject({ apiKey: 'current-key', model: 'current-model' })
     expect(merged.profiles[1]).toMatchObject({ provider: 'fal', apiKey: 'fal-key', model: DEFAULT_FAL_MODEL })
+  })
+})
+
+describe('resolveManagedApiBaseUrl', () => {
+  it('uses intranet sub2api URL for private network hostnames', () => {
+    expect(resolveManagedApiBaseUrl('192.168.0.88')).toBe('http://192.168.0.171:8080')
+    expect(resolveManagedApiBaseUrl('10.10.1.2')).toBe('http://192.168.0.171:8080')
+    expect(resolveManagedApiBaseUrl('localhost')).toBe('http://192.168.0.171:8080')
+  })
+
+  it('uses public sub2api URL for domain hostnames', () => {
+    expect(resolveManagedApiBaseUrl('ai.52moyu.net')).toBe('https://ai.52moyu.net')
+    expect(resolveManagedApiBaseUrl('example.com')).toBe('https://ai.52moyu.net')
+  })
+
+  it('keeps configured URL constants normalized', () => {
+    expect(resolveManagedApiBaseUrl('192.168.0.1')).toBe(SUB2API_INTRANET_BASE_URL)
+    expect(resolveManagedApiBaseUrl('ai.52moyu.net')).toBe(SUB2API_PUBLIC_BASE_URL)
   })
 })

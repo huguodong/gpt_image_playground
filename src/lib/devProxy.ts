@@ -98,7 +98,7 @@ export function getMixedContentError(baseUrl: string, pageProtocol = typeof wind
   return '当前页面是 HTTPS，浏览器会拦截 HTTP API 请求。请改用 HTTPS API，或在本地 HTTP 页面/同源代理环境中使用该地址。'
 }
 
-function isPrivateOrLocalHostname(hostname: string): boolean {
+export function isPrivateOrLocalHostname(hostname: string): boolean {
   const normalized = hostname.trim().toLowerCase()
   if (!normalized) return false
   if (normalized === 'localhost' || normalized === '::1') return true

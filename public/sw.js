@@ -1,5 +1,5 @@
-const CACHE_NAME = 'gpt-image-playground-v0.1.5'
-const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
+const CACHE_NAME = 'ai-52moyu-net-v0.1.7'
+const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon.png', './icon.ico']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
