@@ -1,6 +1,7 @@
 import type { TaskRecord, StoredImage } from '../types'
+import { INDEXED_DB_NAME } from './appConfig'
 
-const DB_NAME = 'ai-52moyu-net'
+const DB_NAME = INDEXED_DB_NAME
 const DB_VERSION = 1
 const STORE_TASKS = 'tasks'
 const STORE_IMAGES = 'images'

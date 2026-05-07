@@ -86,6 +86,8 @@
 
 **配置默认 API URL**：在 Vercel 项目的 **Settings → Environment Variables** 中添加 `VITE_DEFAULT_API_URL`（如 `https://api.openai.com/v1`），然后重新部署即可生效。
 
+同样的方式也适用于公开品牌相关配置：`VITE_PUBLIC_SITE_URL`、`VITE_API_KEY_APPLY_URL`、`VITE_APP_NAMESPACE`。
+
 **配置自动更新**：
 
 本项目已在 `vercel.json` 中关闭了默认的自动部署。若需在同步 GitHub 上游代码后自动更新 Vercel 部署：
@@ -149,7 +151,7 @@ services:
 
 **1. 环境准备与启动**
 
-你可以在项目根目录新建 `.env.local` 文件配置默认 API URL（如 `VITE_DEFAULT_API_URL=https://api.openai.com/v1`）。然后安装依赖并启动：
+你可以在项目根目录新建 `.env.local` 文件配置默认 API URL（如 `VITE_DEFAULT_API_URL=https://api.openai.com/v1`）。如果还需要改页头/帮助弹窗的站点链接、API Key 获取按钮跳转地址或本地存储命名空间，可以直接参考仓库里的 `.env.example` 一起配置。然后安装依赖并启动：
 
 ```bash
 npm install
@@ -205,6 +207,26 @@ https://gpt-image-playground.cooksleep.dev?apiUrl={address}&apiKey={key}
 ```text
 https://cooksleep.github.io/gpt_image_playground?apiUrl={address}&apiKey={key}
 ```
+
+---
+
+## Branding & Namespace Overrides
+
+You can override the app-owned public links and local storage namespace with Vite env vars:
+
+- `VITE_PUBLIC_SITE_URL`: header title link and help-modal footer link target.
+- `VITE_API_KEY_APPLY_URL`: dedicated target for the new "Get API Key" button. Leave it empty to fall back to `VITE_PUBLIC_SITE_URL`.
+- `VITE_APP_NAMESPACE`: shared namespace for IndexedDB, persisted UI state, and exported ZIP filenames.
+
+Example:
+
+```bash
+VITE_PUBLIC_SITE_URL=https://ai.52moyu.net
+VITE_API_KEY_APPLY_URL=https://ai.52moyu.net
+VITE_APP_NAMESPACE=ai-52moyu-net
+```
+
+Important: changing `VITE_APP_NAMESPACE` does **not** automatically reuse the browser data stored under the old namespace. If you need to keep existing local data, export a ZIP first, switch the namespace, then import the ZIP again.
 
 ---
 

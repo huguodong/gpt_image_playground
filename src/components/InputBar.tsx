@@ -4,7 +4,7 @@ import { useStore, submitTask, addImageFromFile, updateTaskInStore, removeMultip
 import { DEFAULT_PARAMS } from '../types'
 import { getActiveApiProfile } from '../lib/apiProfiles'
 import { getMixedContentError, isApiProxyAvailable, readClientDevProxyConfig, shouldUseApiProxy } from '../lib/devProxy'
-import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
+import { getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { normalizeImageSize } from '../lib/size'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import Select from './Select'
@@ -42,7 +42,7 @@ export default function InputBar() {
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
   const settings = useStore((s) => s.settings)
-  const setShowSettings = useStore((s) => s.setShowSettings)
+  const setShowImageUrlImport = useStore((s) => s.setShowImageUrlImport)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const showToast = useStore((s) => s.showToast)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
@@ -53,6 +53,9 @@ export default function InputBar() {
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const searchQuery = useStore((s) => s.searchQuery)
+  const showOnboarding = useStore((s) => s.showOnboarding)
+  const onboardingStep = useStore((s) => s.onboardingStep)
+  const advanceOnboarding = useStore((s) => s.advanceOnboarding)
 
   const filteredTasks = useMemo(() => {
     const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
@@ -154,36 +157,22 @@ export default function InputBar() {
   const dragCounter = useRef(0)
   const isMobile = useIsMobile()
 
-  const canSubmit = prompt.trim() && settings.apiKey
+  const canSubmit = Boolean(prompt.trim() && settings.apiKey.trim())
   const activeProfile = getActiveApiProfile(settings)
-  const activeProvider = activeProfile.provider
   const proxyConfig = readClientDevProxyConfig()
-  const apiProxyEnabled = activeProvider === 'openai' && isApiProxyAvailable(proxyConfig) && (activeProfile.apiProxy || shouldUseApiProxy(activeProfile.baseUrl, proxyConfig))
-  const mixedContentError = activeProvider === 'openai' && !apiProxyEnabled
-    ? getMixedContentError(activeProfile.baseUrl)
-    : null
-  const isFalProvider = activeProvider === 'fal'
-  const moderationDisabled = settings.apiMode === 'responses' || isFalProvider
-  const compressionDisabled = params.output_format === 'png' || isFalProvider
+  const apiProxyEnabled = isApiProxyAvailable(proxyConfig) && (activeProfile.apiProxy || shouldUseApiProxy(activeProfile.baseUrl, proxyConfig))
+  const mixedContentError = !apiProxyEnabled ? getMixedContentError(activeProfile.baseUrl) : null
+  const moderationDisabled = true
+  const compressionDisabled = params.output_format === 'png'
   const outputImageLimit = getOutputImageLimitForSettings(settings)
-  const nLimitHintText = isFalProvider
-    ? `fal.ai 最大请求数量为 ${outputImageLimit}`
-    : `OpenAI 最大请求数量为 ${outputImageLimit}`
-  const displaySize = isFalProvider && params.size === 'auto'
-    ? DEFAULT_FAL_IMAGE_SIZE
-    : normalizeImageSize(params.size) || DEFAULT_PARAMS.size
-  const qualityOptions = isFalProvider
-    ? [
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
-      ]
-    : [
-        { label: 'auto', value: 'auto' },
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
-      ]
+  const nLimitHintText = `Responses API 最大请求数量为 ${outputImageLimit}`
+  const displaySize = normalizeImageSize(params.size) || DEFAULT_PARAMS.size
+  const qualityOptions = [
+    { label: 'auto', value: 'auto' },
+    { label: 'low', value: 'low' },
+    { label: 'medium', value: 'medium' },
+    { label: 'high', value: 'high' },
+  ]
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
   const maskTargetImage = maskDraft
     ? inputImages.find((img) => img.id === maskDraft.targetImageId) ?? null
@@ -191,11 +180,17 @@ export default function InputBar() {
   const referenceImages = maskTargetImage
     ? inputImages.filter((img) => img.id !== maskTargetImage.id)
     : inputImages
-  const submitTooltipText = !settings.apiKey
-    ? '尚未完成 API 配置，请在右上角设置中进行'
+  const submitTooltipText = !settings.apiKey.trim()
+    ? '请先在首页填写 API Key'
     : mixedContentError
-      ? mixedContentError
-      : null
+    ? mixedContentError
+    : null
+
+  const progressPromptOnboarding = useCallback(() => {
+    if (showOnboarding && onboardingStep === 'prompt') {
+      advanceOnboarding()
+    }
+  }, [advanceOnboarding, onboardingStep, showOnboarding])
 
   useEffect(() => {
     setOutputCompressionInput(
@@ -371,11 +366,11 @@ export default function InputBar() {
   }
 
   const showQualityHint = () => {
-    if (settings.codexCli || isFalProvider) setQualityHintVisible(true)
+    setQualityHintVisible(false)
   }
 
   const showSizeHint = () => {
-    if (isFalProvider) setSizeHintVisible(true)
+    setSizeHintVisible(false)
   }
 
   const hideSizeHint = () => {
@@ -391,11 +386,7 @@ export default function InputBar() {
   }
 
   const startSizeHintTouch = () => {
-    if (!isFalProvider) return
-    sizeHintTimerRef.current = window.setTimeout(() => {
-      setSizeHintVisible(true)
-      sizeHintTimerRef.current = null
-    }, 450)
+    clearSizeHintTimer()
   }
 
   const hideQualityHint = () => {
@@ -411,11 +402,7 @@ export default function InputBar() {
   }
 
   const startQualityHintTouch = () => {
-    if (!settings.codexCli && !isFalProvider) return
-    qualityHintTimerRef.current = window.setTimeout(() => {
-      setQualityHintVisible(true)
-      qualityHintTimerRef.current = null
-    }, 450)
+    clearQualityHintTimer()
   }
 
   const clearImageHintTimer = () => {
@@ -959,8 +946,8 @@ export default function InputBar() {
           {displaySize}
         </button>
         <ButtonTooltip
-          visible={isFalProvider && sizeHintVisible}
-          text={<>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</>}
+          visible={sizeHintVisible}
+          text="Responses API 支持 auto 尺寸"
         />
       </label>
       <label
@@ -974,19 +961,16 @@ export default function InputBar() {
       >
         <span className="text-gray-400 dark:text-gray-500 ml-1">质量</span>
         <Select
-          value={settings.codexCli ? 'auto' : isFalProvider && params.quality === 'auto' ? 'high' : params.quality}
+          value={params.quality}
           onChange={(val) => {
-            if (!settings.codexCli) setParams({ quality: val as any })
+            setParams({ quality: val as any })
           }}
           options={qualityOptions}
-          disabled={settings.codexCli}
-          className={settings.codexCli
-            ? 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-xs transition-all duration-200 shadow-sm'
-            : selectClass}
+          className={selectClass}
         />
         <ButtonTooltip
-          visible={(settings.codexCli || isFalProvider) && qualityHintVisible}
-          text={isFalProvider ? <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</> : 'Codex CLI 不支持质量参数'}
+          visible={qualityHintVisible}
+          text="服务端按 Responses API 透传质量参数"
         />
       </label>
       <label className="flex flex-col gap-0.5">
@@ -1029,7 +1013,7 @@ export default function InputBar() {
         />
         <ButtonTooltip
           visible={compressionHintVisible}
-          text={isFalProvider ? 'fal.ai 不支持压缩率参数' : '仅 JPEG 和 WebP 支持压缩率'}
+          text="仅 JPEG 和 WebP 支持压缩率"
         />
       </label>
       <label
@@ -1058,7 +1042,7 @@ export default function InputBar() {
         />
         <ButtonTooltip
           visible={moderationDisabled && moderationHintVisible}
-          text={isFalProvider ? 'fal.ai 不支持审核参数' : 'Responses API 不支持审核参数'}
+          text="Responses API 不支持审核参数"
         />
       </label>
       <label className="relative flex flex-col gap-0.5">
@@ -1129,10 +1113,10 @@ export default function InputBar() {
 
       {showSizePicker && (
         <SizePickerModal
-          currentSize={isFalProvider && params.size === 'auto' ? DEFAULT_FAL_IMAGE_SIZE : params.size}
+          currentSize={params.size}
           onSelect={(size) => setParams({ size })}
           onClose={() => setShowSizePicker(false)}
-          allowAuto={!isFalProvider}
+          allowAuto
         />
       )}
 
@@ -1229,10 +1213,18 @@ export default function InputBar() {
           <textarea
             ref={textareaRef}
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => {
+              const nextPrompt = e.target.value
+              setPrompt(nextPrompt)
+              if (nextPrompt.trim()) {
+                progressPromptOnboarding()
+              }
+            }}
+            onFocus={progressPromptOnboarding}
             onKeyDown={handleKeyDown}
             rows={1}
             placeholder="描述你想生成的图片..."
+            data-onboarding-anchor="prompt"
             className="w-full px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] text-sm focus:outline-none leading-relaxed resize-none shadow-sm transition-[border-color,box-shadow] duration-200"
           />
 
@@ -1263,6 +1255,19 @@ export default function InputBar() {
                     </svg>
                   </button>
                 </div>
+                <button
+                  onClick={() => !atImageLimit && setShowImageUrlImport(true)}
+                  className={`p-2.5 rounded-xl transition-all shadow-sm ${
+                    atImageLimit
+                      ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
+                      : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow'
+                  }`}
+                  title={atImageLimit ? `已达上限 ${API_MAX_IMAGES} 张` : '添加网页图片'}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14L21 3m0 0h-7m7 0v7M3 10h4a3 3 0 013 3v4a1 1 0 01-1 1H5a2 2 0 01-2-2v-6a1 1 0 011-1z" />
+                  </svg>
+                </button>
                 <div
                   className="relative"
                   onMouseEnter={() => setSubmitHover(true)}
@@ -1270,20 +1275,17 @@ export default function InputBar() {
                 >
                   <ButtonTooltip visible={Boolean(submitTooltipText && submitHover)} text={submitTooltipText ?? ''} />
                   <button
-                    onClick={() => settings.apiKey ? submitTask() : setShowSettings(true)}
-                    disabled={settings.apiKey ? (!canSubmit || Boolean(mixedContentError)) : false}
+                    onClick={() => settings.apiKey.trim() ? submitTask() : window.scrollTo({ top: 0, behavior: 'smooth' })}
+                    disabled={!canSubmit || Boolean(mixedContentError)}
+                    data-onboarding-anchor="submit"
                     className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
-                      !settings.apiKey
-                        ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+                      'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
-                    title={settings.apiKey
+                    title={mixedContentError
                       ? mixedContentError
-                        ? mixedContentError
-                        : maskDraft
-                          ? '遮罩编辑 (Ctrl+Enter)'
-                          : '生成 (Ctrl+Enter)'
-                      : '请先配置 API'}
+                      : maskDraft
+                        ? '遮罩编辑 (Ctrl+Enter)'
+                        : '生成 (Ctrl+Enter)'}
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
@@ -1323,6 +1325,19 @@ export default function InputBar() {
                     </svg>
                   </button>
                 </div>
+                <button
+                  onClick={() => !atImageLimit && setShowImageUrlImport(true)}
+                  className={`p-2.5 rounded-xl transition-all shadow-sm flex-shrink-0 ${
+                    atImageLimit
+                      ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
+                      : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300'
+                  }`}
+                  title={atImageLimit ? `已达上限 ${API_MAX_IMAGES} 张` : '添加网页图片'}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14L21 3m0 0h-7m7 0v7M3 10h4a3 3 0 013 3v4a1 1 0 01-1 1H5a2 2 0 01-2-2v-6a1 1 0 011-1z" />
+                  </svg>
+                </button>
                 <div
                   className="relative flex-1"
                   onMouseEnter={() => setSubmitHover(true)}
@@ -1330,19 +1345,16 @@ export default function InputBar() {
                 >
                   <ButtonTooltip visible={Boolean(submitTooltipText && submitHover)} text={submitTooltipText ?? ''} />
                   <button
-                    onClick={() => settings.apiKey ? submitTask() : setShowSettings(true)}
-                    disabled={settings.apiKey ? (!canSubmit || Boolean(mixedContentError)) : false}
-                    title={settings.apiKey
+                    onClick={() => settings.apiKey.trim() ? submitTask() : window.scrollTo({ top: 0, behavior: 'smooth' })}
+                    disabled={!canSubmit || Boolean(mixedContentError)}
+                    data-onboarding-anchor="submit"
+                    title={mixedContentError
                       ? mixedContentError
-                        ? mixedContentError
-                        : maskDraft
-                          ? '遮罩编辑 (Ctrl+Enter)'
-                          : '生成图像 (Ctrl+Enter)'
-                      : '请先配置 API'}
+                      : maskDraft
+                        ? '遮罩编辑 (Ctrl+Enter)'
+                        : '生成图像 (Ctrl+Enter)'}
                     className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all shadow-sm ${
-                      !settings.apiKey
-                        ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+                      'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

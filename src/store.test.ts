@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS } from './lib/apiProfiles'
 import type { TaskRecord } from './types'
-import { editOutputs, markInterruptedOpenAIRunningTasks, submitTask, useStore } from './store'
+import { editOutputs, getOnboardingStepForState, markInterruptedOpenAIRunningTasks, ONBOARDING_VERSION, shouldStartOnboarding, submitTask, useStore } from './store'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 
@@ -34,6 +34,10 @@ describe('mask draft lifecycle in store actions', () => {
       maskEditorImageId: null,
       params: { ...DEFAULT_PARAMS },
       tasks: [],
+      onboardingStatus: 'pending',
+      onboardingVersion: ONBOARDING_VERSION,
+      showOnboarding: false,
+      onboardingStep: 'apiKey',
       detailTaskId: null,
       lightboxImageId: null,
       lightboxImageList: [],
@@ -82,10 +86,9 @@ describe('interrupted OpenAI running tasks', () => {
     const now = 10_000
     const legacyRunning = task({ id: 'legacy-running', status: 'running', createdAt: 1_000, finishedAt: null, elapsed: null })
     const openAIRunning = task({ id: 'openai-running', apiProvider: 'openai', status: 'running', createdAt: 2_000, finishedAt: null, elapsed: null })
-    const falRunning = task({ id: 'fal-running', apiProvider: 'fal', status: 'running', createdAt: 3_000, finishedAt: null, elapsed: null })
     const doneTask = task({ id: 'done-task', apiProvider: 'openai', status: 'done' })
 
-    const result = markInterruptedOpenAIRunningTasks([legacyRunning, openAIRunning, falRunning, doneTask], now)
+    const result = markInterruptedOpenAIRunningTasks([legacyRunning, openAIRunning, doneTask], now)
 
     expect(result.interruptedTasks.map((item) => item.id)).toEqual(['legacy-running', 'openai-running'])
     expect(result.tasks.find((item) => item.id === 'legacy-running')).toMatchObject({
@@ -100,7 +103,111 @@ describe('interrupted OpenAI running tasks', () => {
       finishedAt: now,
       elapsed: 8_000,
     })
-    expect(result.tasks.find((item) => item.id === 'fal-running')).toEqual(falRunning)
     expect(result.tasks.find((item) => item.id === 'done-task')).toEqual(doneTask)
+  })
+
+  it('keeps async running tasks alive across reload restoration', () => {
+    const asyncRunning = task({
+      id: 'async-running',
+      status: 'running',
+      asyncJobId: 'job-123',
+      createdAt: 4_000,
+      finishedAt: null,
+      elapsed: null,
+    })
+
+    const result = markInterruptedOpenAIRunningTasks([asyncRunning], 10_000)
+
+    expect(result.interruptedTasks).toEqual([])
+    expect(result.tasks[0]).toEqual(asyncRunning)
+  })
+})
+
+describe('onboarding trigger', () => {
+  it('starts onboarding for a true first-time user', () => {
+    expect(shouldStartOnboarding(
+      { ...DEFAULT_SETTINGS, apiKey: '' },
+      [],
+      { status: 'pending', version: ONBOARDING_VERSION },
+    )).toBe(true)
+  })
+
+  it('does not start onboarding when api key already exists', () => {
+    expect(shouldStartOnboarding(
+      { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
+      [],
+      { status: 'pending', version: ONBOARDING_VERSION },
+    )).toBe(false)
+  })
+
+  it('does not start onboarding when tasks already exist', () => {
+    expect(shouldStartOnboarding(
+      { ...DEFAULT_SETTINGS, apiKey: '' },
+      [task()],
+      { status: 'pending', version: ONBOARDING_VERSION },
+    )).toBe(false)
+  })
+
+  it('does not start onboarding when current version was skipped', () => {
+    expect(shouldStartOnboarding(
+      { ...DEFAULT_SETTINGS, apiKey: '' },
+      [],
+      { status: 'skipped', version: ONBOARDING_VERSION },
+    )).toBe(false)
+  })
+
+  it('does not start onboarding when current version was completed', () => {
+    expect(shouldStartOnboarding(
+      { ...DEFAULT_SETTINGS, apiKey: '' },
+      [],
+      { status: 'completed', version: ONBOARDING_VERSION },
+    )).toBe(false)
+  })
+})
+
+describe('onboarding completion on first task start', () => {
+  it('marks onboarding completed after the first task enters the list', () => {
+    useStore.setState({
+      showOnboarding: true,
+      onboardingStep: 'submit',
+      onboardingStatus: 'pending',
+      onboardingVersion: ONBOARDING_VERSION,
+    })
+
+    useStore.getState().markOnboardingTaskStarted()
+
+    expect(useStore.getState()).toMatchObject({
+      onboardingStatus: 'completed',
+      onboardingVersion: ONBOARDING_VERSION,
+      showOnboarding: false,
+      onboardingStep: 'submit',
+    })
+  })
+})
+
+describe('onboarding step derivation', () => {
+  it('routes users with a key but no prompt to the inspiration library step', () => {
+    expect(getOnboardingStepForState({ ...DEFAULT_SETTINGS, apiKey: 'test-key' }, '')).toBe('library')
+  })
+})
+
+describe('manual onboarding restart', () => {
+  it('can reopen onboarding from the api key step explicitly', () => {
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
+      prompt: 'already typed',
+      showOnboarding: false,
+      onboardingStep: 'submit',
+      onboardingStatus: 'completed',
+      onboardingVersion: ONBOARDING_VERSION,
+    })
+
+    useStore.getState().startOnboarding('apiKey')
+
+    expect(useStore.getState()).toMatchObject({
+      showOnboarding: true,
+      onboardingStep: 'apiKey',
+      onboardingStatus: 'completed',
+    })
   })
 })

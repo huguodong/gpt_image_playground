@@ -1,5 +1,3 @@
-import { readRuntimeEnv } from './runtimeEnv'
-
 export interface DevProxyConfig {
   enabled: boolean
   prefix: string
@@ -85,8 +83,13 @@ export function readClientDevProxyConfig(): DevProxyConfig | null {
   )
 }
 
-export function isApiProxyAvailable(proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {
-  return readRuntimeEnv(import.meta.env.VITE_API_PROXY_AVAILABLE) === 'true' || Boolean(proxyConfig?.enabled)
+export function isApiProxyAvailable(
+  proxyConfig: DevProxyConfig | null = readClientDevProxyConfig(),
+  isDev = import.meta.env.DEV,
+): boolean {
+  void proxyConfig
+  void isDev
+  return true
 }
 
 export function getMixedContentError(baseUrl: string, pageProtocol = typeof window !== 'undefined' ? window.location.protocol : ''): string | null {
@@ -116,7 +119,7 @@ export function shouldUseApiProxy(
   pageOrigin = typeof window !== 'undefined' ? window.location.origin : '',
   isDev = import.meta.env.DEV,
 ): boolean {
-  if (!isApiProxyAvailable(proxyConfig) || !isDev) return false
+  if (!isApiProxyAvailable(proxyConfig, isDev)) return false
 
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
   if (!normalizedBaseUrl) return false
@@ -124,7 +127,9 @@ export function shouldUseApiProxy(
   try {
     const apiUrl = new URL(normalizedBaseUrl)
     if (pageOrigin && apiUrl.origin === pageOrigin) return false
-    return isPrivateOrLocalHostname(apiUrl.hostname)
+    void isDev
+    // Deployments serve the API through the same-origin Nginx proxy.
+    return true
   } catch {
     return false
   }

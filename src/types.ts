@@ -1,7 +1,7 @@
 // ===== 设置 =====
 
-export type ApiMode = 'images' | 'responses'
-export type ApiProvider = 'openai' | 'fal'
+export type ApiMode = 'responses'
+export type ApiProvider = 'openai'
 
 export interface ApiProfile {
   id: string
@@ -28,6 +28,54 @@ export interface AppSettings {
   clearInputAfterSubmit: boolean
   profiles: ApiProfile[]
   activeProfileId: string
+}
+
+export type OnboardingStatus = 'pending' | 'skipped' | 'completed'
+export type OnboardingStep = 'apiKey' | 'library' | 'prompt' | 'submit'
+
+// ===== 提示词资源库 =====
+
+export type PromptLibraryInsertMode = 'replace' | 'append'
+
+export interface PromptLibraryMeta {
+  repository: string
+  syncedAt: string
+  license: string
+  totalCases: number
+  totalTemplateCategories: number
+}
+
+export interface PromptLibraryCase {
+  id: number
+  title: string
+  category: string
+  styles: string[]
+  scenes: string[]
+  prompt: string
+  promptPreview: string
+  sourceLabel: string
+  sourceUrl: string
+  githubUrl: string
+  thumbnailSrc: string
+  remoteImageUrl: string
+  templateAnchor: string
+  featured?: boolean
+}
+
+export interface PromptLibraryTemplateEntry {
+  id: string
+  title: string
+  kind: 'text' | 'json' | 'tips'
+  content: string
+}
+
+export interface PromptLibraryTemplateCategory {
+  id: string
+  anchor: string
+  title: string
+  coverSrc: string
+  tags: string[]
+  entries: PromptLibraryTemplateEntry[]
 }
 
 // ===== 任务参数 =====
@@ -73,18 +121,14 @@ export interface TaskRecord {
   id: string
   prompt: string
   params: TaskParams
+  /** 服务端异步任务 ID */
+  asyncJobId?: string
   /** 生成时使用的 Provider 类型 */
   apiProvider?: ApiProvider
   /** 生成时使用的 Provider 名称 */
   apiProfileName?: string
   /** 生成时使用的模型 ID */
   apiModel?: string
-  /** fal.ai 队列请求 ID，用于连接断开后的结果恢复 */
-  falRequestId?: string
-  /** fal.ai 队列 endpoint，用于连接断开后的状态和结果查询 */
-  falEndpoint?: string
-  /** fal.ai 任务连接断开后是否等待自动恢复 */
-  falRecoverable?: boolean
   /** API 返回的实际生效参数，用于标记与请求值不一致的情况 */
   actualParams?: Partial<TaskParams>
   /** 输出图片对应的实际生效参数，key 为 outputImages 中的图片 id */
@@ -105,6 +149,25 @@ export interface TaskRecord {
   elapsed: number | null
   /** 是否收藏 */
   isFavorite?: boolean
+}
+
+export interface AsyncResponseImageJobResult {
+  images: string[]
+  actualParams?: Partial<TaskParams>
+  actualParamsList?: Array<Partial<TaskParams> | undefined>
+  revisedPrompts?: Array<string | undefined>
+}
+
+export type AsyncResponseImageJobStatus = 'queued' | 'running' | 'done' | 'error'
+
+export interface AsyncResponseImageJobRecord {
+  jobId: string
+  status: AsyncResponseImageJobStatus
+  createdAt: number
+  startedAt?: number
+  finishedAt?: number
+  error?: string
+  result?: AsyncResponseImageJobResult
 }
 
 // ===== IndexedDB 存储的图片 =====

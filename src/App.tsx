@@ -1,8 +1,5 @@
 import { useEffect } from 'react'
 import { initStore } from './store'
-import { useStore } from './store'
-import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
-import type { AppSettings } from './types'
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
@@ -14,32 +11,16 @@ import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
+import PromptLibraryModal from './components/PromptLibraryModal'
+import ImageUrlImportModal from './components/ImageUrlImportModal'
+import ApiKeyModal from './components/ApiKeyModal'
+import OnboardingModal from './components/OnboardingModal'
+import OnboardingCoachmark from './components/OnboardingCoachmark'
 
 export default function App() {
-  const setSettings = useStore((s) => s.setSettings)
-  useDockerApiUrlMigrationNotice()
-
   useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search)
-    const nextSettings: Partial<AppSettings> = {}
-
-    const apiKeyParam = searchParams.get('apiKey')
-    if (apiKeyParam !== null) {
-      nextSettings.apiKey = apiKeyParam.trim()
-    }
-
-    setSettings(nextSettings)
-
-    if (searchParams.has('apiKey')) {
-      searchParams.delete('apiKey')
-
-      const nextSearch = searchParams.toString()
-      const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`
-      window.history.replaceState(null, '', nextUrl)
-    }
-
     initStore()
-  }, [setSettings])
+  }, [])
 
   useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {
@@ -69,6 +50,11 @@ export default function App() {
       <Toast />
       <MaskEditorModal />
       <ImageContextMenu />
+      <PromptLibraryModal />
+      <ImageUrlImportModal />
+      <ApiKeyModal />
+      <OnboardingModal />
+      <OnboardingCoachmark />
     </>
   )
 }

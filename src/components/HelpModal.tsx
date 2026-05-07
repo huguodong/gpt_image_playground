@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { PUBLIC_SITE_HOSTNAME, PUBLIC_SITE_URL } from '../lib/appConfig'
+import { useStore } from '../store'
 
 interface HelpModalProps {
   onClose: () => void
@@ -18,6 +20,7 @@ function useIsMobile() {
 
 export default function HelpModal({ onClose }: HelpModalProps) {
   const isMobile = useIsMobile()
+  const startOnboarding = useStore((s) => s.startOnboarding)
   useCloseOnEscape(true, onClose)
 
   return createPortal(
@@ -54,6 +57,27 @@ export default function HelpModal({ onClose }: HelpModalProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto mb-6 text-sm text-gray-600 dark:text-gray-300 space-y-6 custom-scrollbar pr-2">
+          <section className="rounded-2xl border border-blue-200/70 bg-blue-50/80 px-4 py-3 dark:border-blue-400/20 dark:bg-blue-500/10">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-medium text-blue-700 dark:text-blue-200">首次生图新手指引</h4>
+                <p className="mt-1 text-xs leading-5 text-blue-600/90 dark:text-blue-100/80">
+                  可以随时重新打开“填 Key → 写提示词 → 点生成”的首次引导。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  startOnboarding('apiKey')
+                  onClose()
+                }}
+                className="shrink-0 rounded-xl bg-blue-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-blue-600"
+              >
+                重新查看
+              </button>
+            </div>
+          </section>
+
           {isMobile ? (
             <>
               <section>
@@ -114,17 +138,17 @@ export default function HelpModal({ onClose }: HelpModalProps) {
 
         <div className="pt-4 border-t border-gray-200 dark:border-white/[0.08] flex justify-center">
           <a
-            href="https://ai.52moyu.net"
+            href={PUBLIC_SITE_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors group"
           >
             <img
               src="/icon.svg"
-              alt="ai.52moyu.net"
+              alt={PUBLIC_SITE_HOSTNAME}
               className="w-5 h-5 rounded-sm group-hover:scale-110 transition-transform"
             />
-            ai.52moyu.net
+            {PUBLIC_SITE_HOSTNAME}
           </a>
         </div>
       </div>

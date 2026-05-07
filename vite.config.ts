@@ -19,6 +19,25 @@ function loadDevProxyConfig() {
 
 export default defineConfig(({ command }) => {
   const devProxyConfig = command === 'serve' ? loadDevProxyConfig() : null
+  const proxy: Record<string, unknown> = {
+    '/api-async': {
+      target: 'http://127.0.0.1:3002',
+      changeOrigin: true,
+    },
+  }
+
+  if (devProxyConfig?.enabled) {
+    proxy[devProxyConfig.prefix] = {
+      target: devProxyConfig.target,
+      changeOrigin: devProxyConfig.changeOrigin,
+      secure: devProxyConfig.secure,
+      rewrite: (path) =>
+        path.replace(
+          new RegExp(`^${devProxyConfig.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+          '',
+        ),
+    }
+  }
 
   return {
     plugins: [react()],
@@ -29,21 +48,7 @@ export default defineConfig(({ command }) => {
     },
     server: {
       host: true,
-      proxy:
-        devProxyConfig?.enabled
-          ? {
-              [devProxyConfig.prefix]: {
-                target: devProxyConfig.target,
-                changeOrigin: devProxyConfig.changeOrigin,
-                secure: devProxyConfig.secure,
-                rewrite: (path) =>
-                  path.replace(
-                    new RegExp(`^${devProxyConfig.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
-                    '',
-                  ),
-              },
-            }
-          : undefined,
+      proxy,
     },
   }
 })

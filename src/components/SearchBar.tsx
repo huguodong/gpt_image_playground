@@ -1,4 +1,5 @@
 import { useStore } from '../store'
+import { openPromptLibrary } from '../lib/promptLibrary'
 import Select from './Select'
 
 export default function SearchBar() {
@@ -12,6 +13,17 @@ export default function SearchBar() {
   return (
     <div data-no-drag-select className="mt-6 mb-4 flex gap-3">
       <div className="flex gap-2 flex-shrink-0 z-20">
+        <button
+          onClick={() => openPromptLibrary()}
+          data-onboarding-anchor="library"
+          className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm font-medium text-blue-600 transition hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20"
+          title="打开灵感库 / 模板库"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3l1.9 5.8H20l-4.8 3.5L17 18l-5-3.6L7 18l1.8-5.7L4 8.8h6.1L12 3z" />
+          </svg>
+          灵感库
+        </button>
         <button
           onClick={() => setFilterFavorite(!filterFavorite)}
           className={`p-2.5 rounded-xl border transition-all ${

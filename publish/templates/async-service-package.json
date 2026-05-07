@@ -1,0 +1,12 @@
+{
+  "name": "gpt-image-async-service",
+  "private": true,
+  "version": "0.2.23",
+  "type": "module",
+  "scripts": {
+    "start": "node server/async-responses-service.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.9.0"
+  }
+}

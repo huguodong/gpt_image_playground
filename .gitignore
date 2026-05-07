@@ -1,3 +1,7 @@
 node_modules/
 dist/
 dev-proxy.config.json
+publish/release/
+publish/local-templates/
+*.out.log
+*.err.log

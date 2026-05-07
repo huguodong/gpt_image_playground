@@ -1,20 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { getMixedContentError, isApiProxyAvailable, readClientDevProxyConfig, shouldUseApiProxy } from '../lib/devProxy'
 import { useStore, exportData, importData, clearAllData } from '../store'
-import {
-  createDefaultOpenAIProfile,
-  DEFAULT_OPENAI_PROFILE_ID,
-  DEFAULT_SETTINGS,
-  getActiveApiProfile,
-  normalizeSettings,
-  resolveManagedApiBaseUrl,
-} from '../lib/apiProfiles'
-import type { ApiProfile, AppSettings } from '../types'
+import { DEFAULT_RESPONSES_MODEL, normalizeSettings } from '../lib/apiProfiles'
+import type { AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-
-function newId(prefix: string) {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
-}
 
 export default function SettingsModal() {
   const showSettings = useStore((s) => s.showSettings)
@@ -23,18 +11,7 @@ export default function SettingsModal() {
   const setSettings = useStore((s) => s.setSettings)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const importInputRef = useRef<HTMLInputElement>(null)
-  
   const [draft, setDraft] = useState<AppSettings>(normalizeSettings(settings))
-  const [showApiKey, setShowApiKey] = useState(false)
-  const managedBaseUrl = resolveManagedApiBaseUrl()
-  
-  const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
-  const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
-  const apiProxyEnabled = apiProxyAvailable && activeProfile.provider === 'openai' && (activeProfile.apiProxy || shouldUseApiProxy(activeProfile.baseUrl))
-  const mixedContentError = activeProfile.provider === 'openai' && !apiProxyEnabled
-    ? getMixedContentError(activeProfile.baseUrl)
-    : null
-
   const wasSettingsOpenRef = useRef(false)
 
   useEffect(() => {
@@ -45,60 +22,16 @@ export default function SettingsModal() {
     if (wasSettingsOpenRef.current) return
 
     wasSettingsOpenRef.current = true
-    const nextDraft = normalizeSettings(apiProxyAvailable ? settings : {
-      ...settings,
-      profiles: settings.profiles.map((profile) => ({ ...profile, apiProxy: false })),
-    })
-    nextDraft.profiles = nextDraft.profiles.map((profile) => ({
-      ...profile,
-      provider: 'openai',
-      baseUrl: managedBaseUrl,
-      model: profile.model.trim() || 'gpt-image-2',
-      apiMode: 'images',
-      codexCli: false,
-      apiProxy: false,
-    }))
-    nextDraft.baseUrl = managedBaseUrl
-    setDraft(nextDraft)
-  }, [apiProxyAvailable, showSettings, settings])
+    setDraft(normalizeSettings(settings))
+  }, [showSettings, settings])
 
   const commitSettings = (nextDraft: AppSettings) => {
-    const normalizedProfiles = nextDraft.profiles.map((profile) => {
-      const normalizedBaseUrl = managedBaseUrl
-      return {
-        ...profile,
-        provider: 'openai',
-        name: profile.name.trim() || (profile.id === DEFAULT_OPENAI_PROFILE_ID ? '默认' : '新配置'),
-        baseUrl: normalizedBaseUrl,
-        model: profile.model.trim() || 'gpt-image-2',
-        timeout: Number(profile.timeout) || DEFAULT_SETTINGS.timeout,
-        apiMode: 'images',
-        apiProxy: false,
-        codexCli: false,
-      }
-    })
-    const fallbackProfile = createDefaultOpenAIProfile({ id: newId('openai') })
     const normalizedDraft = normalizeSettings({
       ...nextDraft,
-      profiles: normalizedProfiles.length ? normalizedProfiles : [fallbackProfile],
-      activeProfileId: normalizedProfiles.some((profile) => profile.id === nextDraft.activeProfileId)
-        ? nextDraft.activeProfileId
-        : (normalizedProfiles[0]?.id ?? fallbackProfile.id),
+      model: nextDraft.model.trim() || DEFAULT_RESPONSES_MODEL,
     })
-    normalizedDraft.baseUrl = managedBaseUrl
-    normalizedDraft.profiles = normalizedDraft.profiles.map((profile) => ({ ...profile, baseUrl: managedBaseUrl, provider: 'openai' }))
     setDraft(normalizedDraft)
     setSettings(normalizedDraft)
-  }
-
-  const getDraftWithActiveProfilePatch = (patch: Partial<ApiProfile>) => ({
-      ...draft,
-      profiles: draft.profiles.map((profile) => profile.id === activeProfile.id ? { ...profile, ...patch } : profile),
-    })
-
-  const updateActiveProfile = (patch: Partial<ApiProfile>) => {
-    const nextDraft = getDraftWithActiveProfilePatch(patch)
-    setDraft(nextDraft)
   }
 
   const handleClose = () => {
@@ -114,22 +47,20 @@ export default function SettingsModal() {
 
   if (!showSettings) return null
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
     if (file) {
       const imported = await importData(file)
       if (imported) {
-        const nextDraft = normalizeSettings(useStore.getState().settings)
-        setDraft(nextDraft)
+        setDraft(normalizeSettings(useStore.getState().settings))
       }
     }
-    e.target.value = ''
+    event.target.value = ''
   }
 
   const handleClearAllData = async () => {
     await clearAllData()
-    const nextDraft = normalizeSettings(useStore.getState().settings)
-    setDraft(nextDraft)
+    setDraft(normalizeSettings(useStore.getState().settings))
   }
 
   return (
@@ -165,7 +96,30 @@ export default function SettingsModal() {
 
         <div className="space-y-6">
           <section>
-            <div className="mb-4 flex items-center justify-between gap-3 relative">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                </svg>
+                生图接入
+              </h4>
+              <span className="shrink-0 rounded bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+                首页填写
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              <div data-selectable-text className="rounded-xl border border-gray-200/70 bg-gray-50/90 px-3 py-3 text-xs leading-relaxed text-gray-500 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-400">
+                API Key 已移动到首页直接填写，减少来回找设置的成本。当前模型固定为 <code className="rounded bg-white/80 px-1 py-0.5 font-mono dark:bg-white/[0.06]">{DEFAULT_RESPONSES_MODEL}</code>，不再需要手动指定。
+              </div>
+              <div data-selectable-text className="rounded-xl border border-gray-200/70 bg-gray-50/90 px-3 py-3 text-xs leading-relaxed text-gray-500 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-400">
+                前端提交任务时会把首页填写的 API Key 发送到本地异步服务，由服务端加密保存并在后台执行 Responses API 请求。
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-4 flex items-center justify-between gap-3">
               <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
                 <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
@@ -190,73 +144,6 @@ export default function SettingsModal() {
                 </div>
                 <div data-selectable-text className="text-[10px] text-gray-400 dark:text-gray-500">
                   开启后，提交成功创建任务时会清空提示词和参考图。
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section>
-            <div className="mb-4 flex items-center justify-between gap-3 relative">
-              <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-                <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                </svg>
-                API 配置
-              </h4>
-              <span className="shrink-0 rounded bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
-                OpenAI 兼容
-              </span>
-            </div>
-
-            <div className="space-y-4">
-              <label className="block">
-                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">sub2api 地址（自动识别）</span>
-                <input
-                  value={managedBaseUrl}
-                  type="text"
-                  readOnly
-                  className="w-full rounded-xl border border-gray-200/70 bg-gray-100/70 px-3 py-2 text-sm text-gray-500 outline-none dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-gray-400"
-                />
-                <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  内网访问自动使用 <code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">http://192.168.0.171:8080</code>，域名访问自动使用 <code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">https://ai.52moyu.net</code>。
-                </div>
-                {mixedContentError && (
-                  <div data-selectable-text className="mt-2 rounded-xl border border-red-200/70 bg-red-50/80 px-3 py-2 text-[10px] leading-relaxed text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-                    {mixedContentError}
-                  </div>
-                )}
-              </label>
-
-              <div className="block">
-                <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">sub2api Key</span>
-                <div className="relative">
-                  <input
-                    value={activeProfile.apiKey}
-                    onChange={(e) => updateActiveProfile({ apiKey: e.target.value })}
-                    type={showApiKey ? 'text' : 'password'}
-                    placeholder="sk-... 或你的 sub2api key"
-                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowApiKey((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                    tabIndex={-1}
-                  >
-                    {showApiKey ? (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                        <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                      </svg>
-                    )}
-                  </button>
                 </div>
               </div>
             </div>
@@ -301,7 +188,7 @@ export default function SettingsModal() {
                 onClick={() =>
                   setConfirmDialog({
                     title: '清空所有数据',
-                    message: '确定要清空所有任务记录、图片数据和供应商配置吗？此操作不可恢复。',
+                    message: '确定要清空所有任务记录、图片数据和本地模型配置吗？此操作不可恢复。',
                     action: () => handleClearAllData(),
                   })
                 }

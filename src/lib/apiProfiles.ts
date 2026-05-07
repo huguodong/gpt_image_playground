@@ -1,25 +1,18 @@
-import type { ApiMode, ApiProfile, ApiProvider, AppSettings } from '../types'
+import type { ApiProfile, AppSettings } from '../types'
 import { readRuntimeEnv } from './runtimeEnv'
-import { isPrivateOrLocalHostname, normalizeBaseUrl } from './devProxy'
+import { normalizeBaseUrl } from './devProxy'
 
-export const SUB2API_INTRANET_BASE_URL = 'http://192.168.0.171:8080'
-export const SUB2API_PUBLIC_BASE_URL = 'https://ai.52moyu.net'
+export const ASYNC_RESPONSES_SERVICE_BASE_URL = '/api-async/v1'
+export const DEFAULT_RESPONSES_MODEL = 'gpt-image-2'
+export const DEFAULT_OPENAI_PROFILE_ID = 'default-openai'
+export const DEFAULT_API_TIMEOUT = 600
 
-export function resolveManagedApiBaseUrl(hostname = typeof window !== 'undefined' ? window.location.hostname : ''): string {
-  const fallback = readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL) || SUB2API_PUBLIC_BASE_URL
-  const rawBaseUrl = hostname && isPrivateOrLocalHostname(hostname)
-    ? SUB2API_INTRANET_BASE_URL
-    : fallback
-  return normalizeBaseUrl(rawBaseUrl)
+export function resolveManagedApiBaseUrl(): string {
+  const fallback = readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL) || 'http://127.0.0.1:8333'
+  return normalizeBaseUrl(fallback)
 }
 
 const DEFAULT_BASE_URL = resolveManagedApiBaseUrl()
-export const DEFAULT_IMAGES_MODEL = 'gpt-image-2'
-export const DEFAULT_RESPONSES_MODEL = 'gpt-5.5'
-export const DEFAULT_FAL_BASE_URL = 'https://fal.run'
-export const DEFAULT_FAL_MODEL = 'openai/gpt-image-2'
-export const DEFAULT_OPENAI_PROFILE_ID = 'default-openai'
-export const DEFAULT_API_TIMEOUT = 600
 
 export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
   return {
@@ -28,100 +21,56 @@ export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}):
     provider: 'openai',
     baseUrl: DEFAULT_BASE_URL,
     apiKey: '',
-    model: DEFAULT_IMAGES_MODEL,
+    model: DEFAULT_RESPONSES_MODEL,
     timeout: DEFAULT_API_TIMEOUT,
-    apiMode: 'images',
+    apiMode: 'responses',
     codexCli: false,
-    apiProxy: false,
+    apiProxy: true,
     ...overrides,
-  }
-}
-
-export function createDefaultFalProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
-  return {
-    id: `fal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-    name: '新配置',
-    provider: 'fal',
-    baseUrl: DEFAULT_FAL_BASE_URL,
-    apiKey: '',
-    model: DEFAULT_FAL_MODEL,
-    timeout: DEFAULT_API_TIMEOUT,
-    apiMode: 'images',
-    codexCli: false,
-    apiProxy: false,
-    ...overrides,
-  }
-}
-
-export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvider): ApiProfile {
-  if (provider === 'fal') {
-    return {
-      ...profile,
-      provider,
-      baseUrl: DEFAULT_FAL_BASE_URL,
-      model: DEFAULT_FAL_MODEL,
-      apiMode: 'images',
-      codexCli: false,
-      apiProxy: false,
-    }
-  }
-
-  return {
-    ...profile,
-    provider,
-    baseUrl: DEFAULT_BASE_URL,
-    model: DEFAULT_IMAGES_MODEL,
   }
 }
 
 export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfile>): ApiProfile {
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
-  const provider: ApiProvider = record.provider === 'fal' ? 'fal' : 'openai'
-  const defaults = provider === 'fal' ? createDefaultFalProfile(fallback) : createDefaultOpenAIProfile(fallback)
-  const apiMode: ApiMode = record.apiMode === 'responses' ? 'responses' : 'images'
+  const defaults = createDefaultOpenAIProfile(fallback)
 
   return {
     ...defaults,
     id: typeof record.id === 'string' && record.id.trim() ? record.id : defaults.id,
     name: typeof record.name === 'string' && record.name.trim() ? record.name : defaults.name,
-    provider,
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : defaults.baseUrl,
+    provider: 'openai',
+    baseUrl: defaults.baseUrl,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
     model: typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : defaults.timeout,
-    apiMode,
-    codexCli: Boolean(record.codexCli),
-    apiProxy: Boolean(record.apiProxy),
+    apiMode: 'responses',
+    codexCli: false,
+    apiProxy: true,
   }
 }
 
 export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSettings {
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
   const legacyProfile = createDefaultOpenAIProfile({
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : DEFAULT_BASE_URL,
-    apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
-    model: typeof record.model === 'string' && record.model.trim() ? record.model : DEFAULT_IMAGES_MODEL,
+    model: typeof record.model === 'string' && record.model.trim() ? record.model : DEFAULT_RESPONSES_MODEL,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : DEFAULT_API_TIMEOUT,
-    apiMode: record.apiMode === 'responses' ? 'responses' : 'images',
-    codexCli: Boolean(record.codexCli),
-    apiProxy: Boolean(record.apiProxy),
   })
   const profiles = Array.isArray(record.profiles) && record.profiles.length
     ? record.profiles.map((profile) => normalizeApiProfile(profile))
     : [legacyProfile]
-  const activeProfileId = typeof record.activeProfileId === 'string' && profiles.some((p) => p.id === record.activeProfileId)
+  const activeProfileId = typeof record.activeProfileId === 'string' && profiles.some((profile) => profile.id === record.activeProfileId)
     ? record.activeProfileId
     : profiles[0].id
-  const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
+  const active = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0]
 
   return {
     baseUrl: active.baseUrl,
     apiKey: active.apiKey,
     model: active.model,
     timeout: active.timeout,
-    apiMode: active.apiMode,
-    codexCli: active.codexCli,
-    apiProxy: active.apiProxy,
+    apiMode: 'responses',
+    codexCli: false,
+    apiProxy: true,
     clearInputAfterSubmit: typeof record.clearInputAfterSubmit === 'boolean' ? record.clearInputAfterSubmit : false,
     profiles,
     activeProfileId,
@@ -131,31 +80,22 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
 export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): ApiProfile {
   const record = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
   const normalized = normalizeSettings(settings)
-  const profile = normalized.profiles.find((p) => p.id === normalized.activeProfileId) ?? normalized.profiles[0] ?? createDefaultOpenAIProfile()
-
-  const nextProfile = {
+  const profile = normalized.profiles.find((item) => item.id === normalized.activeProfileId) ?? normalized.profiles[0] ?? createDefaultOpenAIProfile()
+  return {
     ...profile,
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : profile.baseUrl,
-    apiKey: typeof record.apiKey === 'string' ? record.apiKey : profile.apiKey,
-    model: typeof record.model === 'string' && record.model.trim() ? record.model : profile.model,
-    timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : profile.timeout,
-    apiMode: record.apiMode === 'images' || record.apiMode === 'responses' ? record.apiMode : profile.apiMode,
-    codexCli: typeof record.codexCli === 'boolean' ? record.codexCli : profile.codexCli,
-    apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : profile.apiProxy,
+    provider: 'openai',
+    baseUrl: profile.baseUrl || DEFAULT_BASE_URL,
+    apiKey: typeof record.apiKey === 'string' ? record.apiKey : (typeof profile.apiKey === 'string' ? profile.apiKey : ''),
+    model: typeof record.model === 'string' && record.model.trim() ? record.model : (profile.model.trim() || DEFAULT_RESPONSES_MODEL),
+    timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : (Number(profile.timeout) || DEFAULT_API_TIMEOUT),
+    apiMode: 'responses',
+    codexCli: false,
+    apiProxy: true,
   }
-
-  if (nextProfile.provider === 'openai') {
-    nextProfile.baseUrl = resolveManagedApiBaseUrl()
-  }
-
-  return nextProfile
 }
 
 export function validateApiProfile(profile: ApiProfile): string | null {
-  if (!profile.name.trim()) return '缺少名称'
-  if (profile.provider === 'openai' && !profile.baseUrl.trim()) return '缺少 API URL'
   if (!profile.apiKey.trim()) return '缺少 API Key'
-  if (!profile.model.trim()) return '缺少模型 ID'
   return null
 }
 
@@ -163,13 +103,9 @@ function isDefaultOpenAIProfile(profile: ApiProfile): boolean {
   return profile.id === DEFAULT_OPENAI_PROFILE_ID &&
     profile.name === '默认' &&
     profile.provider === 'openai' &&
-    profile.baseUrl === DEFAULT_BASE_URL &&
     profile.apiKey === '' &&
-    profile.model === DEFAULT_IMAGES_MODEL &&
-    profile.timeout === DEFAULT_API_TIMEOUT &&
-    profile.apiMode === 'images' &&
-    profile.codexCli === false &&
-    profile.apiProxy === false
+    profile.model === DEFAULT_RESPONSES_MODEL &&
+    profile.timeout === DEFAULT_API_TIMEOUT
 }
 
 function hasOnlyDefaultProfiles(settings: AppSettings): boolean {
@@ -178,10 +114,10 @@ function hasOnlyDefaultProfiles(settings: AppSettings): boolean {
     isDefaultOpenAIProfile(settings.profiles[0])
 }
 
-function createImportedProfileId(provider: ApiProvider, usedIds: Set<string>): string {
-  let id = `${provider}-imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+function createImportedProfileId(usedIds: Set<string>): string {
+  let id = `openai-imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
   while (usedIds.has(id)) {
-    id = `${provider}-imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+    id = `openai-imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
   }
   usedIds.add(id)
   return id
@@ -189,11 +125,9 @@ function createImportedProfileId(provider: ApiProvider, usedIds: Set<string>): s
 
 function getApiProfileDedupKey(profile: ApiProfile): string {
   return JSON.stringify([
-    profile.provider,
-    profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
     profile.apiKey.trim(),
     profile.model.trim(),
-    profile.apiMode,
+    profile.timeout,
   ])
 }
 
@@ -225,7 +159,7 @@ export function mergeImportedSettings(currentSettings: Partial<AppSettings> | un
     .filter((profile) => !existingKeys.has(getApiProfileDedupKey(profile)))
     .map((profile) => ({
       ...profile,
-      id: createImportedProfileId(profile.provider, usedIds),
+      id: createImportedProfileId(usedIds),
     }))
   const profiles = [...current.profiles, ...importedProfiles]
 
@@ -239,10 +173,10 @@ export function mergeImportedSettings(currentSettings: Partial<AppSettings> | un
 export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   baseUrl: DEFAULT_BASE_URL,
   apiKey: '',
-  model: DEFAULT_IMAGES_MODEL,
+  model: DEFAULT_RESPONSES_MODEL,
   timeout: DEFAULT_API_TIMEOUT,
-  apiMode: 'images',
+  apiMode: 'responses',
   codexCli: false,
-  apiProxy: false,
+  apiProxy: true,
   clearInputAfterSubmit: false,
 })
