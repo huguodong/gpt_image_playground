@@ -6,7 +6,6 @@ import type {
 const JOBS_BASE_PATH = '/api-async/v1/response-image-jobs'
 
 interface CreateAsyncResponseImageJobRequest {
-  apiKey: string
   model: string
   prompt: string
   params: TaskParams
@@ -33,11 +32,13 @@ async function getApiErrorMessage(response: Response): Promise<string> {
 }
 
 export async function createAsyncResponseImageJob(
+  apiKey: string,
   request: CreateAsyncResponseImageJobRequest,
 ): Promise<AsyncResponseImageJobRecord> {
   const response = await fetch(JOBS_BASE_PATH, {
     method: 'POST',
     headers: {
+      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'Cache-Control': 'no-store, no-cache, max-age=0',
       Pragma: 'no-cache',
@@ -53,13 +54,14 @@ export async function createAsyncResponseImageJob(
   return await response.json() as AsyncResponseImageJobRecord
 }
 
-export async function getAsyncResponseImageJob(jobId: string): Promise<AsyncResponseImageJobRecord> {
+export async function getAsyncResponseImageJob(apiKey: string, jobId: string): Promise<AsyncResponseImageJobRecord> {
   const requestUrl = new URL(`${JOBS_BASE_PATH}/${encodeURIComponent(jobId)}`, window.location.origin)
   requestUrl.searchParams.set('_t', String(Date.now()))
 
   const response = await fetch(requestUrl.toString(), {
     cache: 'no-store',
     headers: {
+      Authorization: `Bearer ${apiKey}`,
       'Cache-Control': 'no-store, no-cache, max-age=0',
       Pragma: 'no-cache',
     },

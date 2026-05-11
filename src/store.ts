@@ -484,8 +484,10 @@ function completeAsyncResponseTask(taskId: string, task: TaskRecord, result: Asy
 async function pollAsyncResponseTask(taskId: string) {
   const task = useStore.getState().tasks.find((item) => item.id === taskId)
   if (!task || !task.asyncJobId || task.status !== 'running') return
+  const { settings } = useStore.getState()
+  const activeProfile = getActiveApiProfile(settings)
   try {
-    const job = await getAsyncResponseImageJob(task.asyncJobId)
+    const job = await getAsyncResponseImageJob(activeProfile.apiKey, task.asyncJobId)
     if (job.status === 'queued' || job.status === 'running') {
       scheduleAsyncJobPoll(taskId)
       return
@@ -697,8 +699,7 @@ async function executeTask(taskId: string) {
       if (!maskDataUrl) throw new Error('遮罩图片已不存在')
     }
 
-    const job = await createAsyncResponseImageJob({
-      apiKey: activeProfile.apiKey,
+    const job = await createAsyncResponseImageJob(activeProfile.apiKey, {
       model: activeProfile.model,
       prompt: task.prompt,
       params: normalizeParamsForSettings(task.params, settings),

@@ -10,6 +10,9 @@ const MAX_IMAGE_INPUT_PAYLOAD_BYTES = 512 * 1024 * 1024
 const DEFAULT_RESPONSES_BASE_URL = 'http://192.168.0.171:8080/v1'
 const DEFAULT_MAX_BODY_MB = 600
 const DEFAULT_CONCURRENCY = 1
+const DEFAULT_SUB2_SYNC_INTERVAL_SECONDS = 60
+const DEFAULT_SUB2_SYNC_PAGE_SIZE = 200
+const DEFAULT_ALLOWED_GROUP_ID = 18
 const DEFAULT_LOG_TIME_ZONE = 'Asia/Shanghai'
 const MIME_MAP = {
   png: 'image/png',
@@ -27,6 +30,17 @@ const LEGACY_DB_PATH = resolve(__dirname, 'response-image-jobs.sqlite')
 const DB_PATH = resolveDbPath()
 const MAX_BODY_BYTES = Number(process.env.ASYNC_MAX_BODY_MB || DEFAULT_MAX_BODY_MB) * 1024 * 1024
 const WORKER_CONCURRENCY = Math.max(1, Number(process.env.ASYNC_WORKER_CONCURRENCY || DEFAULT_CONCURRENCY))
+const SUB2_ALLOWED_GROUP_ID = Math.max(1, Number(process.env.SUB2_ALLOWED_GROUP_ID || DEFAULT_ALLOWED_GROUP_ID))
+const SUB2_SYNC_INTERVAL_MS = Math.max(
+  10,
+  Number(process.env.SUB2_SYNC_INTERVAL_SECONDS || DEFAULT_SUB2_SYNC_INTERVAL_SECONDS),
+) * 1000
+const SUB2_SYNC_PAGE_SIZE = Math.min(
+  1000,
+  Math.max(1, Number(process.env.SUB2_SYNC_PAGE_SIZE || DEFAULT_SUB2_SYNC_PAGE_SIZE)),
+)
+const SUB2_ADMIN_BASE_URL = normalizeAdminBaseUrl(process.env.SUB2_ADMIN_BASE_URL || '')
+const SUB2_ADMIN_API_KEY = String(process.env.SUB2_ADMIN_API_KEY || '').trim()
 const LOG_TIME_ZONE = String(process.env.ASYNC_LOG_TIME_ZONE || DEFAULT_LOG_TIME_ZONE).trim() || DEFAULT_LOG_TIME_ZONE
 const LOG_TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
   timeZone: LOG_TIME_ZONE,
@@ -43,6 +57,12 @@ const LOG_TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
 if (!JOB_SECRET) {
   throw new Error('Missing ASYNC_JOB_SECRET')
 }
+if (!SUB2_ADMIN_BASE_URL) {
+  throw new Error('Missing SUB2_ADMIN_BASE_URL')
+}
+if (!SUB2_ADMIN_API_KEY) {
+  throw new Error('Missing SUB2_ADMIN_API_KEY')
+}
 
 const ENCRYPTION_KEY = createHash('sha256').update(JOB_SECRET, 'utf8').digest()
 
@@ -55,6 +75,7 @@ db.exec(`
     model TEXT NOT NULL,
     prompt TEXT NOT NULL,
     api_key_encrypted TEXT NOT NULL DEFAULT '',
+    client_key_hash TEXT NOT NULL DEFAULT '',
     params_json TEXT NOT NULL,
     input_images_json TEXT NOT NULL,
     mask_data_url TEXT,
@@ -65,6 +86,26 @@ db.exec(`
     result_json TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_jobs_status_created_at ON jobs(status, created_at);
+  CREATE TABLE IF NOT EXISTS allowed_sub2_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_hash TEXT NOT NULL UNIQUE,
+    key_mask TEXT NOT NULL,
+    group_id INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'sub2api',
+    last_seen_at INTEGER NOT NULL,
+    synced_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_allowed_sub2_keys_group_status ON allowed_sub2_keys(group_id, status);
+  CREATE TABLE IF NOT EXISTS sync_state (
+    name TEXT PRIMARY KEY,
+    last_sync_at INTEGER,
+    last_success_at INTEGER,
+    last_error TEXT,
+    updated_at INTEGER NOT NULL
+  );
 `)
 db.prepare("UPDATE jobs SET status = 'queued', started_at = NULL WHERE status = 'running'").run()
 
@@ -72,27 +113,65 @@ const existingColumns = db.prepare('PRAGMA table_info(jobs)').all().map((column)
 if (!existingColumns.includes('api_key_encrypted')) {
   db.exec("ALTER TABLE jobs ADD COLUMN api_key_encrypted TEXT NOT NULL DEFAULT ''")
 }
+if (!existingColumns.includes('client_key_hash')) {
+  db.exec("ALTER TABLE jobs ADD COLUMN client_key_hash TEXT NOT NULL DEFAULT ''")
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_jobs_client_key_hash_created_at ON jobs(client_key_hash, created_at)')
 
 const insertJobStmt = db.prepare(`
   INSERT INTO jobs (
-    id, status, model, prompt, api_key_encrypted, params_json, input_images_json, mask_data_url, created_at
+    id, status, model, prompt, api_key_encrypted, client_key_hash, params_json, input_images_json, mask_data_url, created_at
   ) VALUES (
-    @id, @status, @model, @prompt, @apiKeyEncrypted, @paramsJson, @inputImagesJson, @maskDataUrl, @createdAt
+    @id, @status, @model, @prompt, @apiKeyEncrypted, @clientKeyHash, @paramsJson, @inputImagesJson, @maskDataUrl, @createdAt
   )
 `)
 const getJobStmt = db.prepare(`
-  SELECT id, status, model, prompt, api_key_encrypted, params_json, input_images_json, mask_data_url, created_at,
+  SELECT id, status, model, prompt, api_key_encrypted, client_key_hash, params_json, input_images_json, mask_data_url, created_at,
          started_at, finished_at, error_text, result_json
   FROM jobs
   WHERE id = ?
 `)
 const getQueuedJobStmt = db.prepare(`
-  SELECT id, status, model, prompt, api_key_encrypted, params_json, input_images_json, mask_data_url, created_at,
+  SELECT id, status, model, prompt, api_key_encrypted, client_key_hash, params_json, input_images_json, mask_data_url, created_at,
          started_at, finished_at, error_text, result_json
   FROM jobs
   WHERE status = 'queued'
   ORDER BY created_at ASC
   LIMIT 1
+`)
+const getAllowedSub2KeyStmt = db.prepare(`
+  SELECT key_hash, group_id, status
+  FROM allowed_sub2_keys
+  WHERE key_hash = ?
+`)
+const upsertAllowedSub2KeyStmt = db.prepare(`
+  INSERT INTO allowed_sub2_keys (
+    key_hash, key_mask, group_id, status, source, last_seen_at, synced_at, created_at, updated_at
+  ) VALUES (
+    @keyHash, @keyMask, @groupId, @status, 'sub2api', @lastSeenAt, @syncedAt, @createdAt, @updatedAt
+  )
+  ON CONFLICT(key_hash) DO UPDATE SET
+    key_mask = excluded.key_mask,
+    group_id = excluded.group_id,
+    status = excluded.status,
+    source = excluded.source,
+    last_seen_at = excluded.last_seen_at,
+    synced_at = excluded.synced_at,
+    updated_at = excluded.updated_at
+`)
+const deactivateMissingSub2KeysStmt = db.prepare(`
+  UPDATE allowed_sub2_keys
+  SET status = 'inactive', updated_at = @updatedAt
+  WHERE source = 'sub2api' AND last_seen_at < @lastSeenAt
+`)
+const upsertSyncStateStmt = db.prepare(`
+  INSERT INTO sync_state(name, last_sync_at, last_success_at, last_error, updated_at)
+  VALUES (@name, @lastSyncAt, @lastSuccessAt, @lastError, @updatedAt)
+  ON CONFLICT(name) DO UPDATE SET
+    last_sync_at = excluded.last_sync_at,
+    last_success_at = COALESCE(excluded.last_success_at, sync_state.last_success_at),
+    last_error = excluded.last_error,
+    updated_at = excluded.updated_at
 `)
 const markJobRunningStmt = db.prepare(`
   UPDATE jobs
@@ -145,6 +224,51 @@ function normalizeBaseUrl(baseUrl) {
   return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`
 }
 
+function normalizeAdminBaseUrl(baseUrl) {
+  return String(baseUrl || '').trim().replace(/\/+$/, '')
+}
+
+function sha256Text(value) {
+  return createHash('sha256').update(String(value || ''), 'utf8').digest('hex')
+}
+
+function maskApiKey(value) {
+  const raw = String(value || '')
+  if (!raw) return ''
+  if (raw.length <= 8) return `${raw[0] || '*'}***${raw.slice(-1) || '*'}`
+  return `${raw.slice(0, 4)}...${raw.slice(-4)}`
+}
+
+function parseBearerToken(headers) {
+  const auth = String(headers?.authorization || '').trim()
+  if (!auth) return ''
+  const parts = auth.split(/\s+/, 2)
+  if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') {
+    return parts[1].trim()
+  }
+  return auth
+}
+
+function normalizeKeyStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase()
+  return normalized === 'active' ? 'active' : 'inactive'
+}
+
+function extractEnvelopeData(payload) {
+  if (!payload || typeof payload !== 'object') return null
+  if (payload.data && typeof payload.data === 'object') return payload.data
+  return payload
+}
+
+function extractPaginatedItems(payload) {
+  const data = extractEnvelopeData(payload)
+  if (!data || typeof data !== 'object') return []
+  if (Array.isArray(data.items)) return data.items
+  if (Array.isArray(data.data)) return data.data
+  if (Array.isArray(data.list)) return data.list
+  return []
+}
+
 function formatLogTimestamp(date = new Date()) {
   const parts = Object.create(null)
   for (const part of LOG_TIME_FORMATTER.formatToParts(date)) {
@@ -187,6 +311,116 @@ function decryptSecret(payload) {
     decipher.final(),
   ])
   return decrypted.toString('utf8')
+}
+
+async function getHttpErrorMessage(response) {
+  let errorMsg = `HTTP ${response.status}`
+  try {
+    const errJson = await response.json()
+    if (typeof errJson?.message === 'string' && errJson.message.trim()) errorMsg = errJson.message
+    else if (typeof errJson?.error === 'string' && errJson.error.trim()) errorMsg = errJson.error
+    else if (typeof errJson?.reason === 'string' && errJson.reason.trim()) errorMsg = errJson.reason
+  } catch {
+    try {
+      const txt = await response.text()
+      if (txt.trim()) errorMsg = txt
+    } catch {
+      /* ignore */
+    }
+  }
+  return errorMsg
+}
+
+async function fetchSub2GroupApiKeysPage(page) {
+  const endpoint = new URL(`${SUB2_ADMIN_BASE_URL}/api/v1/admin/groups/${SUB2_ALLOWED_GROUP_ID}/api-keys`)
+  endpoint.searchParams.set('page', String(page))
+  endpoint.searchParams.set('page_size', String(SUB2_SYNC_PAGE_SIZE))
+
+  const response = await fetch(endpoint.toString(), {
+    method: 'GET',
+    headers: {
+      'x-api-key': SUB2_ADMIN_API_KEY,
+      'Cache-Control': 'no-store, no-cache, max-age=0',
+      Pragma: 'no-cache',
+    },
+  })
+  if (!response.ok) {
+    throw new Error(`sub2api 同步失败: ${await getHttpErrorMessage(response)}`)
+  }
+  return await response.json()
+}
+
+async function syncAllowedSub2KeysOnce() {
+  const startedAt = Date.now()
+  const seenAt = startedAt
+  let page = 1
+  let totalFetched = 0
+  let activeCount = 0
+
+  while (true) {
+    const payload = await fetchSub2GroupApiKeysPage(page)
+    const items = extractPaginatedItems(payload)
+    if (!Array.isArray(items) || !items.length) break
+
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue
+      const rawKey = String(item.key || '').trim()
+      if (!rawKey) continue
+      const keyHash = sha256Text(rawKey)
+      const status = normalizeKeyStatus(item.status)
+      const groupID = Number(item.group_id || SUB2_ALLOWED_GROUP_ID)
+      const now = Date.now()
+      upsertAllowedSub2KeyStmt.run({
+        keyHash,
+        keyMask: maskApiKey(rawKey),
+        groupId: Number.isFinite(groupID) ? groupID : SUB2_ALLOWED_GROUP_ID,
+        status,
+        lastSeenAt: seenAt,
+        syncedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      totalFetched += 1
+      if (status === 'active') activeCount += 1
+    }
+
+    if (items.length < SUB2_SYNC_PAGE_SIZE) break
+    page += 1
+  }
+
+  deactivateMissingSub2KeysStmt.run({
+    lastSeenAt: seenAt,
+    updatedAt: Date.now(),
+  })
+  upsertSyncStateStmt.run({
+    name: 'sub2_keys',
+    lastSyncAt: Date.now(),
+    lastSuccessAt: Date.now(),
+    lastError: null,
+    updatedAt: Date.now(),
+  })
+
+  logInfo('sub2api key 同步完成', {
+    groupId: SUB2_ALLOWED_GROUP_ID,
+    pages: page,
+    totalFetched,
+    activeCount,
+  })
+}
+
+async function syncAllowedSub2Keys() {
+  try {
+    await syncAllowedSub2KeysOnce()
+  } catch (error) {
+    upsertSyncStateStmt.run({
+      name: 'sub2_keys',
+      lastSyncAt: Date.now(),
+      lastSuccessAt: null,
+      lastError: error instanceof Error ? error.message : String(error),
+      updatedAt: Date.now(),
+    })
+    logError('sub2api key 同步失败', error, { groupId: SUB2_ALLOWED_GROUP_ID })
+  }
 }
 
 function sendJson(response, statusCode, payload) {
@@ -516,9 +750,37 @@ function readRequestBody(request) {
   })
 }
 
+function createHttpError(statusCode, reason, message) {
+  const error = new Error(message)
+  error.statusCode = statusCode
+  error.reason = reason
+  return error
+}
+
+function assertSub2ApiKeyAllowed(headers) {
+  const apiKey = parseBearerToken(headers)
+  if (!apiKey) {
+    throw createHttpError(400, 'MISSING_SUB2_KEY', '缺少 sub2 key')
+  }
+  const keyHash = sha256Text(apiKey)
+  const row = getAllowedSub2KeyStmt.get(keyHash)
+  if (!row) {
+    throw createHttpError(403, 'GROUP_NOT_ALLOWED', 'sub2 key 不在允许列表')
+  }
+  if (normalizeKeyStatus(row.status) !== 'active') {
+    throw createHttpError(403, 'GROUP_NOT_ALLOWED', 'sub2 key 已被禁用')
+  }
+  if (Number(row.group_id) !== SUB2_ALLOWED_GROUP_ID) {
+    throw createHttpError(403, 'GROUP_NOT_ALLOWED', `仅允许 group_id=${SUB2_ALLOWED_GROUP_ID} 的 key 调用`)
+  }
+  return {
+    apiKey,
+    keyHash,
+  }
+}
+
 function validateJobRequest(body) {
   if (!body || typeof body !== 'object') throw new Error('请求体不能为空')
-  if (typeof body.apiKey !== 'string' || !body.apiKey.trim()) throw new Error('缺少 API Key')
   if (typeof body.model !== 'string' || !body.model.trim()) throw new Error('缺少模型 ID')
   if (typeof body.prompt !== 'string' || !body.prompt.trim()) throw new Error('缺少提示词')
   if (!body.params || typeof body.params !== 'object') throw new Error('缺少参数配置')
@@ -544,6 +806,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === 'POST' && url.pathname === '/api-async/v1/response-image-jobs') {
+      const auth = assertSub2ApiKeyAllowed(request.headers)
       const body = await readRequestBody(request)
       validateJobRequest(body)
 
@@ -554,7 +817,8 @@ const server = createServer(async (request, response) => {
         status: 'queued',
         model: body.model.trim(),
         prompt: body.prompt.trim(),
-        apiKeyEncrypted: encryptSecret(body.apiKey.trim()),
+        apiKeyEncrypted: encryptSecret(auth.apiKey),
+        clientKeyHash: auth.keyHash,
         paramsJson: JSON.stringify(body.params),
         inputImagesJson: JSON.stringify(body.inputImageDataUrls),
         maskDataUrl: body.maskDataUrl ?? null,
@@ -565,6 +829,7 @@ const server = createServer(async (request, response) => {
         model: body.model.trim(),
         inputImageCount: Array.isArray(body.inputImageDataUrls) ? body.inputImageDataUrls.length : 0,
         hasMask: Boolean(body.maskDataUrl),
+        keyHashPrefix: auth.keyHash.slice(0, 8),
       })
       scheduleQueueWork()
       sendJson(response, 202, {
@@ -576,11 +841,15 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/api-async/v1/response-image-jobs/')) {
+      const auth = assertSub2ApiKeyAllowed(request.headers)
       const jobId = decodeURIComponent(url.pathname.split('/').pop() || '')
       const job = toJobRecord(getJobStmt.get(jobId))
       if (!job) {
         sendJson(response, 404, { error: '任务不存在' })
         return
+      }
+      if (String(job.client_key_hash || '') !== auth.keyHash) {
+        throw createHttpError(403, 'FORBIDDEN_JOB_ACCESS', '无权访问该任务')
       }
       sendJson(response, 200, job)
       return
@@ -589,12 +858,19 @@ const server = createServer(async (request, response) => {
     sendJson(response, 404, { error: 'Not found' })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    const statusCode = message === '请求体过大' ? 413 : 400
-    sendJson(response, statusCode, { error: message })
+    const statusCode = message === '请求体过大'
+      ? 413
+      : Number(error?.statusCode) || 400
+    const reason = typeof error?.reason === 'string' && error.reason ? error.reason : undefined
+    sendJson(response, statusCode, reason ? { error: message, reason } : { error: message })
   }
 })
 
 server.listen(PORT, HOST, () => {
+  void syncAllowedSub2Keys()
+  setInterval(() => {
+    void syncAllowedSub2Keys()
+  }, SUB2_SYNC_INTERVAL_MS)
   scheduleQueueWork()
   logInfo('异步服务已启动', {
     host: HOST,
@@ -602,5 +878,7 @@ server.listen(PORT, HOST, () => {
     baseUrl: BASE_URL,
     dbPath: DB_PATH,
     workerConcurrency: WORKER_CONCURRENCY,
+    allowedGroupId: SUB2_ALLOWED_GROUP_ID,
+    sub2SyncIntervalSeconds: Math.round(SUB2_SYNC_INTERVAL_MS / 1000),
   })
 })
