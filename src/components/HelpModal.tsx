@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
+import { PUBLIC_SITE_HOSTNAME, PUBLIC_SITE_URL } from '../lib/appConfig'
+import { useStore } from '../store'
 
 interface HelpModalProps {
   onClose: () => void
@@ -19,9 +20,8 @@ function useIsMobile() {
 
 export default function HelpModal({ onClose }: HelpModalProps) {
   const isMobile = useIsMobile()
-  const modalRef = useRef<HTMLDivElement>(null)
+  const startOnboarding = useStore((s) => s.startOnboarding)
   useCloseOnEscape(true, onClose)
-  usePreventBackgroundScroll(true, modalRef)
 
   return createPortal(
     <div
@@ -31,7 +31,6 @@ export default function HelpModal({ onClose }: HelpModalProps) {
     >
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" />
       <div
-        ref={modalRef}
         className="relative z-10 w-full max-w-md rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 flex flex-col max-h-[85vh] custom-scrollbar"
         onClick={(e) => e.stopPropagation()}
       >
@@ -57,7 +56,28 @@ export default function HelpModal({ onClose }: HelpModalProps) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain mb-6 text-sm text-gray-600 dark:text-gray-300 space-y-6 custom-scrollbar pr-2">
+        <div className="flex-1 overflow-y-auto mb-6 text-sm text-gray-600 dark:text-gray-300 space-y-6 custom-scrollbar pr-2">
+          <section className="rounded-2xl border border-blue-200/70 bg-blue-50/80 px-4 py-3 dark:border-blue-400/20 dark:bg-blue-500/10">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-medium text-blue-700 dark:text-blue-200">首次生图新手指引</h4>
+                <p className="mt-1 text-xs leading-5 text-blue-600/90 dark:text-blue-100/80">
+                  可以随时重新打开“填 Key → 写提示词 → 点生成”的首次引导。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  startOnboarding('apiKey')
+                  onClose()
+                }}
+                className="shrink-0 rounded-xl bg-blue-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-blue-600"
+              >
+                重新查看
+              </button>
+            </div>
+          </section>
+
           {isMobile ? (
             <>
               <section>
@@ -79,7 +99,7 @@ export default function HelpModal({ onClose }: HelpModalProps) {
                   批量操作
                 </h4>
                 <div className="space-y-4">
-                  <p>选中一条或多条记录后，页面底部会出现操作栏，支持<strong className="text-gray-500 dark:text-gray-400 font-medium">取消选择</strong>、<strong className="text-blue-500 dark:text-blue-400 font-medium">全选当前可见记录</strong>、<strong className="text-yellow-500 dark:text-yellow-400 font-medium">批量收藏</strong>、<strong className="text-green-500 dark:text-green-400 font-medium">批量下载</strong>，和<strong className="text-red-500 dark:text-red-400 font-medium">批量删除</strong>。</p>
+                  <p>选中一条或多条记录后，页面底部会出现操作栏，支持<strong className="text-yellow-500 dark:text-yellow-400 font-medium">批量收藏</strong>、<strong className="text-red-500 dark:text-red-400 font-medium">批量删除</strong>，或<strong className="text-blue-500 dark:text-blue-400 font-medium">全选当前可见记录</strong>。</p>
                 </div>
               </section>
             </>
@@ -109,7 +129,7 @@ export default function HelpModal({ onClose }: HelpModalProps) {
                   批量操作
                 </h4>
                 <div className="space-y-4">
-                  <p>选中一条或多条记录后，页面底部会出现操作栏，支持<strong className="text-gray-500 dark:text-gray-400 font-medium">取消选择</strong>、<strong className="text-blue-500 dark:text-blue-400 font-medium">全选当前可见记录</strong>、<strong className="text-yellow-500 dark:text-yellow-400 font-medium">批量收藏</strong>、<strong className="text-green-500 dark:text-green-400 font-medium">批量下载</strong>，和<strong className="text-red-500 dark:text-red-400 font-medium">批量删除</strong>。</p>
+                  <p>选中一条或多条记录后，页面底部会出现操作栏，支持<strong className="text-yellow-500 dark:text-yellow-400 font-medium">批量收藏</strong>、<strong className="text-red-500 dark:text-red-400 font-medium">批量删除</strong>，或<strong className="text-blue-500 dark:text-blue-400 font-medium">全选当前可见记录</strong>。</p>
                 </div>
               </section>
             </>

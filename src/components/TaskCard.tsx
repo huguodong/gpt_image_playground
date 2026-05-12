@@ -1,10 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
 import type { TaskRecord } from '../types'
-import { useStore, ensureImageThumbnailCached, subscribeImageThumbnail, updateTaskInStore, retryTask } from '../store'
+import { useStore, getCachedImage, ensureImageCached, updateTaskInStore, retryTask } from '../store'
 import { formatImageRatio } from '../lib/size'
-import { getParamDisplay, ActualValueBadge } from '../lib/paramDisplay'
-import { DEFAULT_IMAGES_MODEL, DEFAULT_FAL_MODEL } from '../lib/apiProfiles'
-import { CodeIcon } from './icons'
+import { ParamValue } from '../lib/paramDisplay'
+import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 
 interface Props {
   task: TaskRecord
@@ -32,26 +31,13 @@ export default function TaskCard({
   const [swipeStartedSelected, setSwipeStartedSelected] = useState(false)
   const [swipeActionActive, setSwipeActionActive] = useState(false)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
-  const settings = useStore((s) => s.settings)
+  const showToast = useStore((s) => s.showToast)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const swipeResetTimerRef = useRef<number | null>(null)
   const suppressClickUntilRef = useRef(0)
   const horizontalSwipeRef = useRef(false)
 
-  const isTagScrollTarget = (target: EventTarget | null) => {
-    return target instanceof Element && Boolean(target.closest('[data-tag-scroll-area]'))
-  }
-
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (isTagScrollTarget(e.target)) {
-      touchStartRef.current = null
-      horizontalSwipeRef.current = false
-      setIsSwiping(false)
-      setSwipeOffset(0)
-      setSwipeActionActive(false)
-      return
-    }
-
     if (swipeResetTimerRef.current != null) {
       window.clearTimeout(swipeResetTimerRef.current)
       swipeResetTimerRef.current = null
@@ -64,7 +50,6 @@ export default function TaskCard({
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (isTagScrollTarget(e.target)) return
     if (!touchStartRef.current) return
     const deltaX = e.touches[0].clientX - touchStartRef.current.x
     const deltaY = e.touches[0].clientY - touchStartRef.current.y
@@ -81,15 +66,6 @@ export default function TaskCard({
   }
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (isTagScrollTarget(e.target)) {
-      touchStartRef.current = null
-      horizontalSwipeRef.current = false
-      setIsSwiping(false)
-      setSwipeOffset(0)
-      setSwipeActionActive(false)
-      return
-    }
-
     setIsSwiping(false)
     setSwipeOffset(0)
     
@@ -129,50 +105,54 @@ export default function TaskCard({
 
   // 定时更新运行中任务的计时
   useEffect(() => {
-    if (task.status !== 'running' && !(task.status === 'error' && (task.falRecoverable || task.customRecoverable))) return
+    if (task.status !== 'running') return
     const id = setInterval(() => setNow(Date.now()), 1000)
     setNow(Date.now())
     return () => clearInterval(id)
-  }, [task.customRecoverable, task.falRecoverable, task.status])
+  }, [task.status])
 
   // 加载缩略图
   useEffect(() => {
     setCoverRatio('')
     setCoverSize('')
-    setThumbSrc('')
 
-    let cancelled = false
-    const imageId = task.outputImages?.[0]
-    let unsubscribe: (() => void) | undefined
-
-    const applyThumbnail = (thumbnail: { dataUrl: string; width?: number; height?: number }) => {
-      if (cancelled) return
-      setThumbSrc(thumbnail.dataUrl)
-      if (thumbnail.width && thumbnail.height) {
-        setCoverRatio(formatImageRatio(thumbnail.width, thumbnail.height))
-        setCoverSize(`${thumbnail.width}×${thumbnail.height}`)
+    if (task.outputImages?.[0]) {
+      const cached = getCachedImage(task.outputImages[0])
+      if (cached) {
+        setThumbSrc(cached)
+      } else {
+        ensureImageCached(task.outputImages[0]).then((url) => {
+          if (url) setThumbSrc(url)
+        })
       }
     }
+  }, [task.outputImages])
 
-    if (imageId) {
-      unsubscribe = subscribeImageThumbnail(imageId, applyThumbnail)
-      ensureImageThumbnailCached(imageId).then((thumbnail) => {
-        if (cancelled || !thumbnail) return
-        applyThumbnail(thumbnail)
-      }).catch(() => {
-        if (!cancelled) setThumbSrc('')
-      })
+  useEffect(() => {
+    if (!thumbSrc) return
+
+    let cancelled = false
+    const image = new Image()
+    image.onload = () => {
+      if (!cancelled && image.naturalWidth > 0 && image.naturalHeight > 0) {
+        setCoverRatio(formatImageRatio(image.naturalWidth, image.naturalHeight))
+        setCoverSize(`${image.naturalWidth}×${image.naturalHeight}`)
+      }
+    }
+    image.src = thumbSrc
+    if (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+      setCoverRatio(formatImageRatio(image.naturalWidth, image.naturalHeight))
+      setCoverSize(`${image.naturalWidth}×${image.naturalHeight}`)
     }
 
     return () => {
       cancelled = true
-      unsubscribe?.()
     }
-  }, [task.outputImages])
+  }, [thumbSrc])
 
   const duration = (() => {
     let seconds: number
-    if (task.status === 'running' || task.falRecoverable || task.customRecoverable) {
+    if (task.status === 'running') {
       seconds = Math.floor((now - task.createdAt) / 1000)
     } else if (task.elapsed != null) {
       seconds = Math.floor(task.elapsed / 1000)
@@ -183,31 +163,27 @@ export default function TaskCard({
     const ss = String(seconds % 60).padStart(2, '0')
     return `${mm}:${ss}`
   })()
+  const aggregateActualParams = task.outputImages?.length
+    ? { ...task.actualParams, n: task.outputImages.length }
+    : task.actualParams
   const isSwipeReady = Math.abs(swipeOffset) >= 40
   const showSwipeAction = isSwipeReady || swipeActionActive
-  const isFalReconnecting = task.status === 'error' && task.falRecoverable
-  const isCustomReconnecting = task.status === 'error' && task.customRecoverable
-  const showRunningTimer = task.status === 'running' || isFalReconnecting || isCustomReconnecting
+  const showRunningTimer = task.status === 'running'
   const swipeBgClass = showSwipeAction
     ? swipeStartedSelected
       ? 'bg-gray-500 dark:bg-gray-600'
       : 'bg-blue-500'
     : 'bg-gray-200 dark:bg-gray-700'
 
-  const qualityDisplay = getParamDisplay(task, 'quality')
-  const showQuality = task.params.quality !== 'auto' || qualityDisplay.isMismatch
-
-  const sizeDisplay = getParamDisplay(task, 'size')
-  const showSize = task.params.size !== 'auto' || sizeDisplay.isMismatch
-
-  const formatDisplay = getParamDisplay(task, 'output_format')
-  const showFormat = task.params.output_format !== 'png' || formatDisplay.isMismatch
-
-  const nDisplay = getParamDisplay(task, 'n')
-  const showN = task.params.n > 1 || nDisplay.isMismatch
-
-  const defaultModelForProvider = task.apiProvider === 'fal' ? DEFAULT_FAL_MODEL : DEFAULT_IMAGES_MODEL
-  const showModel = task.apiModel && task.apiModel !== defaultModelForProvider
+  const copyAsyncJobId = async () => {
+    if (!task.asyncJobId) return
+    try {
+      await copyTextToClipboard(task.asyncJobId)
+      showToast('JobID 已复制', 'success')
+    } catch (err) {
+      showToast(getClipboardFailureMessage('复制 JobID 失败', err), 'error')
+    }
+  }
 
   return (
     <div className="relative rounded-xl">
@@ -313,7 +289,6 @@ export default function TaskCard({
             <>
               <img
                 src={thumbSrc}
-                data-image-id={task.outputImages[0]}
                 className="saveable-image w-full h-full object-cover"
                 loading="lazy"
                 alt=""
@@ -364,92 +339,49 @@ export default function TaskCard({
 
         {/* 右侧信息区域 */}
         <div className="flex-1 p-3 flex flex-col min-w-0">
-          <div className="flex-1 min-h-0 mb-2 overflow-hidden">
+          <div className="flex-1 min-h-0 mb-2">
             <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed line-clamp-3">
               {task.prompt || '(无提示词)'}
             </p>
           </div>
           <div className="mt-auto flex flex-col gap-1.5">
-            {/* 参数与信息：横向滚动 */}
-            <div 
-              data-tag-scroll-area
-              className="flex overflow-x-auto hide-scrollbar pt-0.5 gap-1.5 whitespace-nowrap mask-edge-r min-w-0 pr-2"
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchMove={(e) => e.stopPropagation()}
-              onTouchEnd={(e) => e.stopPropagation()}
-              onTouchCancel={(e) => e.stopPropagation()}
-            >
-              {/* API Name */}
-              {(task.apiProfileName || task.apiProvider) && (
-                <span 
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-gray-600 dark:text-gray-300 text-xs flex-shrink-0"
-                  title={task.apiProfileName || task.apiProvider}
+            {task.asyncJobId && (
+              <div className="flex items-center justify-between gap-2 rounded bg-gray-50 px-2 py-1 text-[11px] text-gray-500 dark:bg-gray-800/50 dark:text-gray-400">
+                <span className="min-w-0 truncate">JobID: {task.asyncJobId}</span>
+                <button
+                  onClick={copyAsyncJobId}
+                  className="flex-shrink-0 rounded p-0.5 text-gray-400 transition hover:bg-gray-200 hover:text-blue-500 dark:hover:bg-gray-700"
+                  title="复制 JobID"
                 >
-                  <CodeIcon className="w-3 h-3 flex-shrink-0 text-gray-400" />
-                  <span className="truncate max-w-[8rem]">
-                    {task.apiProfileName || task.apiProvider}
-                  </span>
-                </span>
-              )}
-              {/* Model */}
-              {showModel && (
-                <span 
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-gray-600 dark:text-gray-300 text-xs flex-shrink-0"
-                  title={task.apiModel}
-                >
-                  <svg className="w-3 h-3 flex-shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16h8a2 2 0 002-2V6a2 2 0 00-2-2H8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 8H5a2 2 0 00-2 2v9a2 2 0 002 2h8a2 2 0 002-2v-1" />
                   </svg>
-                  <span className="truncate max-w-[8rem]">
-                    {task.apiModel}
-                  </span>
-                </span>
-              )}
-              {/* Mask */}
+                </button>
+              </div>
+            )}
+            {/* 参数：横向滚动 */}
+            <div className="flex overflow-x-auto hide-scrollbar gap-1.5 whitespace-nowrap mask-edge-r min-w-0 pr-2">
+              <ParamValue task={task} paramKey="quality" className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" />
+              <ParamValue task={task} paramKey="size" className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" />
+              <ParamValue task={task} paramKey="output_format" className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" />
+              <ParamValue task={task} paramKey="n" className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" actualParams={aggregateActualParams} />
               {task.maskImageId && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs flex-shrink-0">
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
-                  局部重绘
+                <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 flex-shrink-0">
+                  mask
                 </span>
               )}
-              {/* Params: only show if not default or mismatch */}
-              {showQuality && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-xs flex-shrink-0">
-                  <span className="text-gray-400 dark:text-gray-500">质量</span>
-                  {qualityDisplay.isMismatch ? <ActualValueBadge value={qualityDisplay.displayValue} className="px-1 rounded-sm" /> : <span className="text-gray-600 dark:text-gray-300">{qualityDisplay.displayValue}</span>}
-                </span>
-              )}
-              {showSize && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-xs flex-shrink-0">
-                  <span className="text-gray-400 dark:text-gray-500">尺寸</span>
-                  {sizeDisplay.isMismatch ? <ActualValueBadge value={sizeDisplay.displayValue} className="px-1 rounded-sm" /> : <span className="text-gray-600 dark:text-gray-300">{sizeDisplay.displayValue}</span>}
-                </span>
-              )}
-              {showFormat && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-xs flex-shrink-0">
-                  <span className="text-gray-400 dark:text-gray-500">格式</span>
-                  {formatDisplay.isMismatch ? <ActualValueBadge value={formatDisplay.displayValue} className="px-1 rounded-sm" /> : <span className="text-gray-600 dark:text-gray-300">{formatDisplay.displayValue}</span>}
-                </span>
-              )}
-              {showN && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-xs flex-shrink-0">
-                  <span className="text-gray-400 dark:text-gray-500">数量</span>
-                  {nDisplay.isMismatch ? <ActualValueBadge value={nDisplay.displayValue} className="px-1 rounded-sm" /> : <span className="text-gray-600 dark:text-gray-300">{nDisplay.displayValue}</span>}
-                </span>
-              )}
-            </div>
+              </div>
             {/* 操作按钮 */}
             <div
-              className="flex w-full items-center justify-between flex-shrink-0 mt-0.5 sm:w-auto sm:justify-end sm:gap-1"
+              className="flex gap-1 justify-end flex-shrink-0"
               onClick={(e) => e.stopPropagation()}
             >
-              {((task.status === 'error' && !isFalReconnecting) || settings.alwaysShowRetryButton) && (
+              {task.status === 'error' && (
                 <button
                   onClick={() => retryTask(task)}
                   className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-400 hover:text-blue-500 transition"
-                  title="重试任务"
+                  title="重试失败任务"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />

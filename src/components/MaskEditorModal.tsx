@@ -6,7 +6,6 @@ import { canvasToBlob, loadImage } from '../lib/canvasImage'
 import { storeImage } from '../lib/db'
 import { prepareMaskTargetDataUrl, replaceMaskTargetImage } from '../lib/maskPreprocess'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import {
   clampViewTransform,
   clientPointToCanvasPoint,
@@ -153,7 +152,6 @@ export default function MaskEditorModal() {
     setMaskEditorImageId(null)
   }
   useCloseOnEscape(Boolean(imageId), close)
-  usePreventBackgroundScroll(Boolean(imageId))
 
   useEffect(() => () => {
     if (maskInfoTimerRef.current != null) {
@@ -804,7 +802,6 @@ export default function MaskEditorModal() {
           id: workingTargetId,
           dataUrl: sourceDataUrl,
         }),
-        { equivalentImageIds: { [savingImageId]: workingTargetId } },
       )
       setMaskDraft({
         targetImageId: workingTargetId,

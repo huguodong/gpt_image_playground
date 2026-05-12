@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useStore, getCachedImage, ensureImageCached } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 
 const MIN_SCALE = 1
@@ -24,38 +23,25 @@ export default function Lightbox() {
 
   const close = useCallback(() => setLightboxImageId(null), [setLightboxImageId])
   useCloseOnEscape(Boolean(lightboxImageId), close)
-  usePreventBackgroundScroll(Boolean(lightboxImageId))
 
   // 图片加载
   useEffect(() => {
-    let cancelled = false
-
     if (!lightboxImageId) {
       setSrc('')
       return
     }
-
-    setSrc('')
-
-    const imageId = lightboxImageId
-    const cached = getCachedImage(imageId)
+    const cached = getCachedImage(lightboxImageId)
     if (cached) {
       setSrc(cached)
     } else {
-      ensureImageCached(imageId).then((url) => {
-        if (!cancelled && url) setSrc(url)
+      ensureImageCached(lightboxImageId).then((url) => {
+        if (url) setSrc(url)
       })
-    }
-
-    return () => {
-      cancelled = true
     }
   }, [lightboxImageId])
 
   // 遮罩图加载
   useEffect(() => {
-    let cancelled = false
-
     if (!lightboxImageId) {
       setMaskImageSrc('')
       return
@@ -66,25 +52,18 @@ export default function Lightbox() {
       return
     }
 
-    setMaskImageSrc('')
-
     const taskWithMask = tasks.find((t) => t.maskTargetImageId === lightboxImageId && t.maskImageId)
     if (taskWithMask?.maskImageId) {
-      const maskImageId = taskWithMask.maskImageId
-      const cached = getCachedImage(maskImageId)
+      const cached = getCachedImage(taskWithMask.maskImageId)
       if (cached) {
         setMaskImageSrc(cached)
       } else {
-        ensureImageCached(maskImageId).then((url) => {
-          if (!cancelled && url) setMaskImageSrc(url)
+        ensureImageCached(taskWithMask.maskImageId).then((url) => {
+          if (url) setMaskImageSrc(url)
         })
       }
     } else {
       setMaskImageSrc('')
-    }
-
-    return () => {
-      cancelled = true
     }
   }, [lightboxImageId, maskDraft?.targetImageId, maskDraft?.maskDataUrl, tasks])
 
@@ -139,7 +118,6 @@ export default function Lightbox() {
   return (
     <LightboxInner
       src={src}
-      imageId={lightboxImageId}
       maskPreviewSrc={maskPreviewSrc}
       onClose={close}
       showNav={showNav}
@@ -153,7 +131,6 @@ export default function Lightbox() {
 
 interface LightboxInnerProps {
   src: string
-  imageId: string
   maskPreviewSrc?: string
   onClose: () => void
   showNav: boolean
@@ -164,7 +141,7 @@ interface LightboxInnerProps {
 }
 
 /** 内部组件：保证挂载时 DOM 已经存在，所有 ref / effect 都可靠 */
-function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, currentIndex, total, onPrev, onNext }: LightboxInnerProps) {
+function LightboxInner({ src, maskPreviewSrc, onClose, showNav, currentIndex, total, onPrev, onNext }: LightboxInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   // 用 ref 追踪最新变换，避免闭包过期
@@ -484,7 +461,6 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
         >
           <img
             src={src}
-            data-image-id={imageId}
             className="saveable-image max-w-[85vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
             onDragStart={(e) => e.preventDefault()}
             alt=""
