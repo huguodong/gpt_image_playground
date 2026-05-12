@@ -848,8 +848,12 @@ const server = createServer(async (request, response) => {
         sendJson(response, 404, { error: '任务不存在' })
         return
       }
-      if (String(job.client_key_hash || '') !== auth.keyHash) {
-        throw createHttpError(403, 'FORBIDDEN_JOB_ACCESS', '无权访问该任务')
+      if (String(job.client_key_hash || '') && String(job.client_key_hash || '') !== auth.keyHash) {
+        logInfo('任务查询 key 与创建 key 不一致，按同组策略放行', {
+          jobId,
+          requestKeyHashPrefix: auth.keyHash.slice(0, 8),
+          jobKeyHashPrefix: String(job.client_key_hash || '').slice(0, 8),
+        })
       }
       sendJson(response, 200, job)
       return

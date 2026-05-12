@@ -123,6 +123,8 @@ export interface TaskRecord {
   params: TaskParams
   /** 服务端异步任务 ID */
   asyncJobId?: string
+  /** 任务提交时使用的 API Key（用于轮询任务状态，避免切换配置后鉴权失败） */
+  authApiKey?: string
   /** 生成时使用的 Provider 类型 */
   apiProvider?: ApiProvider
   /** 生成时使用的 Provider 名称 */

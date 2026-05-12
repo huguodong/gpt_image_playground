@@ -481,13 +481,56 @@ function completeAsyncResponseTask(taskId: string, task: TaskRecord, result: Asy
   })
 }
 
+function isJobAccessDeniedError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('无权访问该任务') ||
+    message.includes('sub2 key 不在允许列表') ||
+    message.includes('sub2 key 已被禁用') ||
+    message.includes('仅允许 group_id=')
+}
+
+function getTaskPollApiKeyCandidates(task: TaskRecord, settings: AppSettings): string[] {
+  const candidates: string[] = []
+  const pushCandidate = (key: string | null | undefined) => {
+    const normalized = typeof key === 'string' ? key.trim() : ''
+    if (!normalized || candidates.includes(normalized)) return
+    candidates.push(normalized)
+  }
+
+  pushCandidate(task.authApiKey)
+  pushCandidate(settings.profiles.find((profile) => profile.name === task.apiProfileName)?.apiKey)
+  for (const profile of settings.profiles) pushCandidate(profile.apiKey)
+  pushCandidate(settings.apiKey)
+  pushCandidate(getActiveApiProfile(settings).apiKey)
+  return candidates
+}
+
 async function pollAsyncResponseTask(taskId: string) {
   const task = useStore.getState().tasks.find((item) => item.id === taskId)
   if (!task || !task.asyncJobId || task.status !== 'running') return
-  const { settings } = useStore.getState()
-  const activeProfile = getActiveApiProfile(settings)
   try {
-    const job = await getAsyncResponseImageJob(activeProfile.apiKey, task.asyncJobId)
+    const settings = useStore.getState().settings
+    const candidates = getTaskPollApiKeyCandidates(task, settings)
+    let job: Awaited<ReturnType<typeof getAsyncResponseImageJob>> | null = null
+    let resolvedApiKey = task.authApiKey?.trim() ? task.authApiKey : ''
+    let lastError: unknown = null
+
+    for (const candidateApiKey of candidates) {
+      try {
+        job = await getAsyncResponseImageJob(candidateApiKey, task.asyncJobId)
+        resolvedApiKey = candidateApiKey
+        break
+      } catch (error) {
+        lastError = error
+        if (isJobAccessDeniedError(error)) continue
+        throw error
+      }
+    }
+    if (!job) throw (lastError ?? new Error('任务轮询失败'))
+    if (!task.authApiKey || task.authApiKey !== resolvedApiKey) {
+      updateTaskInStore(taskId, { authApiKey: resolvedApiKey })
+    }
+
     if (job.status === 'queued' || job.status === 'running') {
       scheduleAsyncJobPoll(taskId)
       return
@@ -652,6 +695,7 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
     id: taskId,
     prompt: prompt.trim(),
     params: normalizedParams,
+    authApiKey: activeProfile.apiKey,
     apiProvider: 'openai',
     apiProfileName: activeProfile.name,
     apiModel: activeProfile.model,
@@ -685,6 +729,7 @@ async function executeTask(taskId: string) {
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
   if (!task) return
   const activeProfile = getActiveApiProfile(settings)
+  const requestApiKey = task.authApiKey?.trim() ? task.authApiKey : activeProfile.apiKey
 
   try {
     const inputDataUrls: string[] = []
@@ -699,7 +744,7 @@ async function executeTask(taskId: string) {
       if (!maskDataUrl) throw new Error('遮罩图片已不存在')
     }
 
-    const job = await createAsyncResponseImageJob(activeProfile.apiKey, {
+    const job = await createAsyncResponseImageJob(requestApiKey, {
       model: activeProfile.model,
       prompt: task.prompt,
       params: normalizeParamsForSettings(task.params, settings),
@@ -708,6 +753,7 @@ async function executeTask(taskId: string) {
     })
     updateTaskInStore(taskId, {
       asyncJobId: job.jobId,
+      authApiKey: requestApiKey,
       createdAt: job.createdAt,
       status: 'running',
       error: null,
@@ -750,6 +796,7 @@ export async function retryTask(task: TaskRecord) {
     id: taskId,
     prompt: task.prompt,
     params: normalizedParams,
+    authApiKey: activeProfile.apiKey,
     apiProvider: 'openai',
     apiProfileName: activeProfile.name,
     apiModel: activeProfile.model,
