@@ -7,13 +7,29 @@ export function getOutputImageLimitForSettings(_settings: AppSettings) {
   return MAX_OPENAI_OUTPUT_IMAGES
 }
 
-export function normalizeParamsForSettings(params: TaskParams, settings: AppSettings): TaskParams {
+export function normalizeParamsForSettings(
+  params: TaskParams,
+  settings: AppSettings,
+  options: { hasInputImages?: boolean } = {},
+): TaskParams {
+  const activeProfile = getActiveApiProfile(settings)
   const outputImageLimit = getOutputImageLimitForSettings(settings)
   const nextParams: TaskParams = {
     ...params,
     size: normalizeImageSize(params.size) || DEFAULT_PARAMS.size,
     moderation: DEFAULT_PARAMS.moderation,
     n: Math.min(outputImageLimit, Math.max(1, params.n || DEFAULT_PARAMS.n)),
+  }
+
+  if (activeProfile.provider === 'openai' && activeProfile.codexCli) {
+    nextParams.quality = DEFAULT_PARAMS.quality
+  }
+
+  if (activeProfile.provider === 'fal') {
+    if (!options.hasInputImages && nextParams.size === 'auto') nextParams.size = DEFAULT_FAL_IMAGE_SIZE
+    if (nextParams.quality === 'auto') nextParams.quality = 'high'
+    nextParams.moderation = DEFAULT_PARAMS.moderation
+    nextParams.output_compression = DEFAULT_PARAMS.output_compression
   }
 
   if (nextParams.output_format === 'png') {

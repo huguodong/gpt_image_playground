@@ -1,22 +1,4 @@
 node_modules/
 dist/
 dev-proxy.config.json
-publish/release/
-publish/local-templates/
-*.out.log
-*.err.log
-
-# local env files
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# runtime sqlite data
-19/*.sqlite*
-server/*.sqlite*
-
-# generated runtime assets
-generated/
-logs/
+.wrangler/
