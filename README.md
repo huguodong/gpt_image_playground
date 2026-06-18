@@ -221,8 +221,8 @@ You can override the app-owned public links and local storage namespace with Vit
 Example:
 
 ```bash
-VITE_PUBLIC_SITE_URL=https://ai.52moyu.net
-VITE_API_KEY_APPLY_URL=https://ai.52moyu.net
+VITE_PUBLIC_SITE_URL=https://52moyu.net
+VITE_API_KEY_APPLY_URL=https://52moyu.net
 VITE_APP_NAMESPACE=ai-52moyu-net
 ```
 

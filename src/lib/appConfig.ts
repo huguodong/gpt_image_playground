@@ -1,6 +1,6 @@
 import { readRuntimeEnv } from './runtimeEnv'
 
-const DEFAULT_PUBLIC_SITE_URL = 'https://ai.52moyu.net'
+const DEFAULT_PUBLIC_SITE_URL = 'https://52moyu.net'
 const DEFAULT_APP_NAMESPACE = 'ai-52moyu-net'
 
 type AppConfigEnv = Pick<ImportMetaEnv, 'VITE_PUBLIC_SITE_URL' | 'VITE_API_KEY_APPLY_URL' | 'VITE_APP_NAMESPACE'>

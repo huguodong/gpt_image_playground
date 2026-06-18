@@ -4,9 +4,9 @@ import { resolveAppConfig } from './appConfig'
 describe('resolveAppConfig', () => {
   it('uses defaults when no env values are provided', () => {
     expect(resolveAppConfig({})).toEqual({
-      publicSiteUrl: 'https://ai.52moyu.net',
-      apiKeyApplyUrl: 'https://ai.52moyu.net',
-      publicSiteHostname: 'ai.52moyu.net',
+      publicSiteUrl: 'https://52moyu.net',
+      apiKeyApplyUrl: 'https://52moyu.net',
+      publicSiteHostname: '52moyu.net',
       appNamespace: 'ai-52moyu-net',
       indexedDbName: 'ai-52moyu-net',
       persistStorageKey: 'ai-52moyu-net',
@@ -40,9 +40,9 @@ describe('resolveAppConfig', () => {
       VITE_PUBLIC_SITE_URL: '   ',
       VITE_API_KEY_APPLY_URL: 'not-a-url',
     })).toMatchObject({
-      publicSiteUrl: 'https://ai.52moyu.net',
-      apiKeyApplyUrl: 'https://ai.52moyu.net',
-      publicSiteHostname: 'ai.52moyu.net',
+      publicSiteUrl: 'https://52moyu.net',
+      apiKeyApplyUrl: 'https://52moyu.net',
+      publicSiteHostname: '52moyu.net',
     })
   })
 

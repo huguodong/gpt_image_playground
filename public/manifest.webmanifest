@@ -1,7 +1,7 @@
 {
-  "name": "ai.52moyu.net",
-  "short_name": "ai.52moyu.net",
-  "description": "ai.52moyu.net 生图网站",
+  "name": "52moyu.net",
+  "short_name": "52moyu.net",
+  "description": "52moyu.net 生图网站",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
