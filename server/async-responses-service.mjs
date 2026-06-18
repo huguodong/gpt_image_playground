@@ -7,7 +7,7 @@ import Database from 'better-sqlite3'
 
 const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
 const MAX_IMAGE_INPUT_PAYLOAD_BYTES = 512 * 1024 * 1024
-const DEFAULT_RESPONSES_BASE_URL = 'http://192.168.0.171:8080/v1'
+const DEFAULT_RESPONSES_BASE_URL = 'https://ai.52moyu.net'
 const DEFAULT_MAX_BODY_MB = 600
 const DEFAULT_CONCURRENCY = 1
 const DEFAULT_SUB2_SYNC_INTERVAL_SECONDS = 60

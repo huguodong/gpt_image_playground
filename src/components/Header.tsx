@@ -23,7 +23,7 @@ export default function Header() {
               rel="noopener noreferrer"
               className="text-gray-800 dark:text-gray-100 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
             >
-              GPT Image 生图器
+              摸鱼生图器
             </a>
           </h1>
           {hasUpdate && latestRelease && (
